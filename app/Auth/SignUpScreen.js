@@ -7,6 +7,7 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -35,7 +36,7 @@ const SignUpScreen = () => {
     firstName: '',
     lastName: '',
     email: '',
-    phone: '', 
+    phone: '',
     password: '',
     confirmPassword: '',
     gender: '',
@@ -49,7 +50,7 @@ const SignUpScreen = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [showGenderDropdown, setShowGenderDropdown] = useState(false);
-  
+
   const [dateInput, setDateInput] = useState('');
   const [tempSelectedDate, setTempSelectedDate] = useState(null);
 
@@ -76,9 +77,9 @@ const SignUpScreen = () => {
     if (!lastNameValidation.isValid) newErrors.lastName = lastNameValidation.error;
     const emailValidation = validateEmail(formData.email);
     if (!emailValidation.isValid) newErrors.email = emailValidation.error;
-    
+
     if (!formData.phone || formData.phone.length < 10) {
-        newErrors.phone = 'Please enter a valid phone number';
+      newErrors.phone = 'Please enter a valid phone number';
     }
 
     const passwordValidation = validatePassword(formData.password);
@@ -102,9 +103,9 @@ const SignUpScreen = () => {
       Alert.alert('Terms Required', 'You must agree to the terms.');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       const fullName = `${formData.firstName} ${formData.lastName}`;
       const d = formData.dateOfBirth;
@@ -117,26 +118,23 @@ const SignUpScreen = () => {
         lastName: formData.lastName,
         fullName: fullName,
         phone: formData.phone,
-        dateOfBirth: formattedDOB, 
+        dateOfBirth: formattedDOB,
         gender: formData.gender,
       });
-      
+
       if (result && result.success) {
         Alert.alert(
-          'Success!', 
-          'User registered successfully!', 
-          [{ 
-            text: 'OK', 
+          'Success!',
+          'User registered successfully!',
+          [{
+            text: 'OK',
             onPress: () => {
-              // Navigating to the 'main' group and 'home' screen
-              // Based on your Root _layout.js name="main"
               router.replace('/main/home');
-            } 
+            }
           }],
           { cancelable: false }
         );
       } else if (result?.error?.includes('auth/email-already-in-use')) {
-        // Handling the error seen in your console
         Alert.alert(
           'Account Exists',
           'This email is already in use. Please sign in instead.',
@@ -225,9 +223,9 @@ const SignUpScreen = () => {
 
   const openCalendar = () => {
     if (!formData.dateOfBirth) {
-        setTempSelectedDate(new Date(2000, 0, 1));
+      setTempSelectedDate(new Date(2000, 0, 1));
     } else {
-        setTempSelectedDate(formData.dateOfBirth);
+      setTempSelectedDate(formData.dateOfBirth);
     }
     setShowDatePicker(true);
   };
@@ -242,9 +240,19 @@ const SignUpScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      
+      {/* IMPROVED HEADER SECTION */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+        <TouchableOpacity 
+          onPress={() => router.back()} 
+          style={styles.backButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons 
+            name="arrow-back" 
+            size={28} 
+            color={COLORS.text || '#000000'} // Fallback to black if COLORS.text is undefined
+          />
         </TouchableOpacity>
       </View>
 
@@ -269,11 +277,11 @@ const SignUpScreen = () => {
           </View>
 
           <View style={styles.inputContainer}>
-            <TextInput 
-              style={[styles.input, errors.phone && styles.inputError]} 
-              placeholder="Phone Number" 
-              value={formData.phone} 
-              onChangeText={(text) => updateField('phone', text)} 
+            <TextInput
+              style={[styles.input, errors.phone && styles.inputError]}
+              placeholder="Phone Number"
+              value={formData.phone}
+              onChangeText={(text) => updateField('phone', text)}
               keyboardType="phone-pad"
             />
             {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
@@ -298,14 +306,14 @@ const SignUpScreen = () => {
 
           <View style={styles.inputContainer}>
             <View style={styles.inputWrapper}>
-              <TextInput 
-                style={[styles.input, errors.dateOfBirth && styles.inputError, { paddingRight: 55 }]} 
-                placeholder="Date of Birth" 
-                value={dateInput} 
-                onChangeText={handleManualDateInput} 
-                keyboardType="numeric" 
-                maxLength={10} 
-                cursorColor={COLORS.accent} 
+              <TextInput
+                style={[styles.input, errors.dateOfBirth && styles.inputError, { paddingRight: 55 }]}
+                placeholder="Date of Birth"
+                value={dateInput}
+                onChangeText={handleManualDateInput}
+                keyboardType="numeric"
+                maxLength={10}
+                cursorColor={COLORS.accent}
               />
               <TouchableOpacity onPress={openCalendar} style={styles.iconInside}>
                 <Ionicons name="calendar-outline" size={22} color={COLORS.textLight} />
@@ -316,23 +324,23 @@ const SignUpScreen = () => {
 
           <View style={styles.inputContainer}>
             <View style={styles.inputWrapper}>
-              <TextInput 
-                style={[styles.input, errors.password && styles.inputError, { paddingRight: 55 }]} 
-                placeholder="Password" 
-                value={formData.password} 
-                onChangeText={(text) => updateField('password', text)} 
-                secureTextEntry={!showPassword} 
-                cursorColor={COLORS.accent} 
+              <TextInput
+                style={[styles.input, errors.password && styles.inputError, { paddingRight: 55 }]}
+                placeholder="Password"
+                value={formData.password}
+                onChangeText={(text) => updateField('password', text)}
+                secureTextEntry={!showPassword}
+                cursorColor={COLORS.accent}
               />
-              <TouchableOpacity 
-                onPress={() => setShowPassword(!showPassword)} 
+              <TouchableOpacity
+                onPress={() => setShowPassword(!showPassword)}
                 style={styles.iconInside}
                 activeOpacity={0.7}
               >
-                <Ionicons 
-                  name={showPassword ? "eye-outline" : "eye-off-outline"} 
-                  size={22} 
-                  color={COLORS.textLight} 
+                <Ionicons
+                  name={showPassword ? "eye-outline" : "eye-off-outline"}
+                  size={22}
+                  color={COLORS.textLight}
                 />
               </TouchableOpacity>
             </View>
@@ -341,23 +349,23 @@ const SignUpScreen = () => {
 
           <View style={styles.inputContainer}>
             <View style={styles.inputWrapper}>
-              <TextInput 
-                style={[styles.input, errors.confirmPassword && styles.inputError, { paddingRight: 55 }]} 
-                placeholder="Confirm Password" 
-                value={formData.confirmPassword} 
-                onChangeText={(text) => updateField('confirmPassword', text)} 
-                secureTextEntry={!showConfirmPassword} 
-                cursorColor={COLORS.accent} 
+              <TextInput
+                style={[styles.input, errors.confirmPassword && styles.inputError, { paddingRight: 55 }]}
+                placeholder="Confirm Password"
+                value={formData.confirmPassword}
+                onChangeText={(text) => updateField('confirmPassword', text)}
+                secureTextEntry={!showConfirmPassword}
+                cursorColor={COLORS.accent}
               />
-              <TouchableOpacity 
-                onPress={() => setShowConfirmPassword(!showConfirmPassword)} 
+              <TouchableOpacity
+                onPress={() => setShowConfirmPassword(!showConfirmPassword)}
                 style={styles.iconInside}
                 activeOpacity={0.7}
               >
-                <Ionicons 
-                  name={showConfirmPassword ? "eye-outline" : "eye-off-outline"} 
-                  size={22} 
-                  color={COLORS.textLight} 
+                <Ionicons
+                  name={showConfirmPassword ? "eye-outline" : "eye-off-outline"}
+                  size={22}
+                  color={COLORS.textLight}
                 />
               </TouchableOpacity>
             </View>
@@ -382,9 +390,9 @@ const SignUpScreen = () => {
           </View>
 
           <TouchableOpacity style={styles.googleButton} onPress={handleGoogleSignIn}>
-            <Image 
-              source={{ uri: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' }} 
-              style={styles.googleIcon} 
+            <Image
+              source={{ uri: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' }}
+              style={styles.googleIcon}
             />
             <Text style={styles.googleButtonText}>Continue with Google</Text>
           </TouchableOpacity>
@@ -397,7 +405,7 @@ const SignUpScreen = () => {
         animationType="fade"
         onRequestClose={() => setShowDatePicker(false)}
       >
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.modalOverlay}
           activeOpacity={1}
           onPress={() => setShowDatePicker(false)}
@@ -405,14 +413,14 @@ const SignUpScreen = () => {
           <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
             <View style={styles.calendarContainer}>
               <View style={styles.calendarHeader}>
-                <TouchableOpacity 
-                    style={styles.yearSelectorTrigger} 
-                    onPress={() => setShowYearPicker(!showYearPicker)}
+                <TouchableOpacity
+                  style={styles.yearSelectorTrigger}
+                  onPress={() => setShowYearPicker(!showYearPicker)}
                 >
-                    <Text style={styles.calendarTitle}>
-                        {tempSelectedDate ? tempSelectedDate.getFullYear() : 'Select Year'}
-                    </Text>
-                    <Ionicons name={showYearPicker ? "chevron-up" : "chevron-down"} size={20} color="#000" />
+                  <Text style={styles.calendarTitle}>
+                    {tempSelectedDate ? tempSelectedDate.getFullYear() : 'Select Year'}
+                  </Text>
+                  <Ionicons name={showYearPicker ? "chevron-up" : "chevron-down"} size={20} color="#000" />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setShowDatePicker(false)} style={styles.closeButton}>
                   <Ionicons name="close" size={24} color={COLORS.text} />
@@ -421,30 +429,30 @@ const SignUpScreen = () => {
 
               {showYearPicker ? (
                 <View style={styles.yearPickerContainer}>
-                    <FlatList
-                        data={years}
-                        keyExtractor={(item) => item.toString()}
-                        renderItem={({ item }) => (
-                            <TouchableOpacity 
-                                style={[
-                                    styles.yearItem, 
-                                    tempSelectedDate?.getFullYear() === item && styles.yearItemSelected
-                                ]}
-                                onPress={() => handleYearSelect(item)}
-                            >
-                                <Text style={[
-                                    styles.yearItemText,
-                                    tempSelectedDate?.getFullYear() === item && styles.yearItemTextSelected
-                                ]}>
-                                    {item}
-                                </Text>
-                            </TouchableOpacity>
-                        )}
-                        initialNumToRender={20}
-                        getItemLayout={(data, index) => (
-                            {length: 50, offset: 50 * index, index}
-                        )}
-                    />
+                  <FlatList
+                    data={years}
+                    keyExtractor={(item) => item.toString()}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={[
+                          styles.yearItem,
+                          tempSelectedDate?.getFullYear() === item && styles.yearItemSelected
+                        ]}
+                        onPress={() => handleYearSelect(item)}
+                      >
+                        <Text style={[
+                          styles.yearItemText,
+                          tempSelectedDate?.getFullYear() === item && styles.yearItemTextSelected
+                        ]}>
+                          {item}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    initialNumToRender={20}
+                    getItemLayout={(data, index) => (
+                      { length: 50, offset: 50 * index, index }
+                    )}
+                  />
                 </View>
               ) : (
                 <Calendar
@@ -472,8 +480,8 @@ const SignUpScreen = () => {
                 <TouchableOpacity style={styles.cancelButton} onPress={handleCancelDate}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.okButton, !tempSelectedDate && styles.okButtonDisabled]} 
+                <TouchableOpacity
+                  style={[styles.okButton, !tempSelectedDate && styles.okButtonDisabled]}
                   onPress={handleConfirmDate}
                   disabled={!tempSelectedDate}
                 >
@@ -490,8 +498,19 @@ const SignUpScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { paddingHorizontal: 16, paddingVertical: 8 },
-  backButton: { width: 40, height: 40, justifyContent: 'center' },
+  // Increased height and added paddingTop to clear the notch/status bar area
+  header: { 
+    paddingHorizontal: 16, 
+    height: 60, 
+    justifyContent: 'center',
+    marginTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 
+  },
+  backButton: { 
+    width: 50, 
+    height: 50, 
+    justifyContent: 'center', 
+    alignItems: 'flex-start' 
+  },
   scrollView: { flex: 1 },
   scrollContent: { padding: 24 },
   title: { fontSize: 32, fontWeight: 'bold', color: COLORS.text, marginBottom: 8 },
@@ -513,7 +532,7 @@ const styles = StyleSheet.create({
   checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: COLORS.textLight, marginRight: 8, justifyContent: 'center', alignItems: 'center' },
   checkboxChecked: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
   checkboxLabel: { fontSize: 14, color: COLORS.text, flex: 1 },
-  signUpButton: { backgroundColor: COLORS.accent, borderRadius: 30, paddingVertical: 16, alignItems: 'center', marginBottom: 24, height: 56, justifyContent: 'center'  },
+  signUpButton: { backgroundColor: COLORS.accent, borderRadius: 30, paddingVertical: 16, alignItems: 'center', marginBottom: 24, height: 56, justifyContent: 'center' },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { fontSize: 18, fontWeight: 'bold', color: COLORS.textWhite },
   errorText: { color: COLORS.error, fontSize: 12, marginTop: 6, marginLeft: 20 },

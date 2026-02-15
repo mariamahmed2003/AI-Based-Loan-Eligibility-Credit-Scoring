@@ -73,7 +73,7 @@ const SignInScreen = () => {
 
       if (result.success) {
         // Navigate to home screen
-        router.replace('/(main)/home');
+        router.replace('/main/home');
       } else {
         // Show error message
         Alert.alert('Sign In Failed', result.error);
