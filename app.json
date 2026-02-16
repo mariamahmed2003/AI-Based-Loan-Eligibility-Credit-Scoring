@@ -38,13 +38,9 @@
             "backgroundColor": "#000000"
           }
         }
-<<<<<<< HEAD
       ],
       "@react-native-google-signin/google-signin",
       "@react-native-community/datetimepicker"
-=======
-      ]
->>>>>>> e2c667c2f1b6db8ec307b06d10c4cc5746c524ea
     ],
     "experiments": {
       "typedRoutes": true,
