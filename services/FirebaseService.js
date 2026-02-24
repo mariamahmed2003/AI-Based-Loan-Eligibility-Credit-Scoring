@@ -21,7 +21,6 @@ class FirebaseService {
   
   /**
    * Standard Email/Password Sign Up
-   * Results in the "Envelope" icon in Firebase Console
    */
   async signUp(userData) {
     try {
@@ -34,13 +33,12 @@ class FirebaseService {
         displayName: `${firstName} ${lastName}`
       });
       
-      // SAVING CLEAN DATA: No UID field inside document, no financialProfile, clean date
       await setDoc(doc(db, 'users', user.uid), {
         email: email,
         firstName: firstName,
         lastName: lastName,
         displayName: `${firstName} ${lastName}`,
-        dateOfBirth: dateOfBirth, // Handled as YYYY-MM-DD from the Screen
+        dateOfBirth: dateOfBirth,
         gender: gender,
         phone: phone || '',
         createdAt: serverTimestamp(),
@@ -57,13 +55,14 @@ class FirebaseService {
   }
 
   /**
-   * Google Sign-In
-   * Results in the "Google G" icon in Firebase Console Provider list
+   * Google Sign-In using Access Token
+   * Updated to follow your requested static structure while maintaining Firestore logic
    */
-  async signInWithGoogle(idToken) {
+  async signInWithGoogle(accessToken) {
     try {
-      // 1. Create the credential using the token from the Google Sign-In popup
-      const credential = GoogleAuthProvider.credential(idToken);
+      // 1. Create the credential using the accessToken
+      // Note: Passing null as the first param (idToken) and accessToken as the second
+      const credential = GoogleAuthProvider.credential(null, accessToken);
       
       // 2. Sign in to Firebase with that credential
       const userCredential = await signInWithCredential(auth, credential);
@@ -80,10 +79,10 @@ class FirebaseService {
           lastName: nameParts.slice(1).join(' '),
           email: user.email,
           displayName: user.displayName,
-          photoUrl: user.photoURL, // Added photoUrl like your example code
+          photoUrl: user.photoURL,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-          assistiveMode: null, // Added custom field from your example
+          assistiveMode: null,
         });
       }
       

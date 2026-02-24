@@ -4,8 +4,10 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { Ionicons } from '@expo/vector-icons';
+import * as Google from 'expo-auth-session/providers/google';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import * as WebBrowser from 'expo-web-browser';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -22,6 +24,9 @@ import {
 } from 'react-native';
 import FirebaseService from '../../services/FirebaseService';
 import { validateEmail, validatePassword } from '../../utils/validators';
+
+// Required so the browser redirects back to the app after Google auth
+WebBrowser.maybeCompleteAuthSession();
 
 const COLORS = {
   primary: '#0A2540',       // Navy Blue
@@ -44,9 +49,92 @@ const SignInScreen = () => {
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   // Added state for password visibility toggle to match SignUp logic
   const [showPassword, setShowPassword] = useState(false);
+
+  // ─────────────────────────────────────────────────────────────
+  // Google Auth Setup
+  //
+  // Replace the placeholder strings below with your real Client IDs.
+  //
+  // HOW TO GET YOUR CLIENT IDs:
+  //  1. Go to https://console.cloud.google.com
+  //  2. Select your Firebase project → APIs & Services → Credentials
+  //  3. Create OAuth 2.0 Client IDs for:
+  //       • Web application   → paste as webClientId
+  //       • Android           → paste as androidClientId
+  //       • iOS               → paste as iosClientId
+  //  4. For Expo Go testing:
+  //       • Use the Web client ID as expoClientId  OR
+  //       • Create an "Expo" client type if available
+  //
+  // Also add to app.json under "expo" → "scheme": "your-app-scheme"
+  // This is required for the redirect to work on mobile.
+  // ─────────────────────────────────────────────────────────────
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    expoClientId:   '910946341679-0sdrn2i08tg7uq3p776ec2deg6uj8ong.apps.googleusercontent.com',
+    androidClientId:'910946341679-bcnvnnuik5kjbneg9gai1pnps09fret0.apps.googleusercontent.com',
+    iosClientId:    '910946341679-atfofuk0hca05q8le503s3il9311s7g9.apps.googleusercontent.com',
+    webClientId:    '910946341679-0sdrn2i08tg7uq3p776ec2deg6uj8ong.apps.googleusercontent.com',
+    // Forces the account chooser to always appear so the user can
+    // pick from saved accounts or tap "Add another account".
+    selectAccount: true,
+    
+  });
+
+  // Listen for Google auth response
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { authentication } = response;
+      handleGoogleCredential(authentication.accessToken);
+    } else if (response?.type === 'error') {
+      setGoogleLoading(false);
+      Alert.alert('Google Sign In Failed', response.error?.message || 'Something went wrong.');
+    } else if (response?.type === 'dismiss') {
+      // User closed the picker without selecting
+      setGoogleLoading(false);
+    }
+  }, [response]);
+
+  // Exchange Google access token with Firebase
+  const handleGoogleCredential = async (accessToken) => {
+    try {
+      setGoogleLoading(true);
+
+      // Sign in via FirebaseService.
+      // Your FirebaseService.signInWithGoogle should:
+      //   1. Build a GoogleAuthProvider credential from the accessToken
+      //   2. Call signInWithCredential(auth, credential)
+      //
+      // Example to add inside FirebaseService.js:
+      //
+      //   import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+      //
+      //   static async signInWithGoogle(accessToken) {
+      //     try {
+      //       const credential = GoogleAuthProvider.credential(null, accessToken);
+      //       const result = await signInWithCredential(auth, credential);
+      //       return { success: true, user: result.user };
+      //     } catch (error) {
+      //       return { success: false, error: error.message };
+      //     }
+      //   }
+
+      const result = await FirebaseService.signInWithGoogle(accessToken);
+
+      if (result.success) {
+        router.replace('/main/home');
+      } else {
+        Alert.alert('Google Sign In Failed', result.error);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'An unexpected error occurred during Google Sign In.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const validateForm = () => {
     const newErrors = {};
@@ -78,8 +166,14 @@ const SignInScreen = () => {
     }
   };
 
-  const handleGoogleSignIn = () => {
-    Alert.alert('Google Sign In', 'Google authentication coming soon.');
+  // Opens the native Google account chooser
+  const handleGoogleSignIn = async () => {
+    if (!request) {
+      Alert.alert('Not Ready', 'Google Sign In is initializing. Please try again.');
+      return;
+    }
+    setGoogleLoading(true);
+    await promptAsync();
   };
 
   return (
@@ -166,7 +260,7 @@ const SignInScreen = () => {
             <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
           </TouchableOpacity>
 
-          {/* ── Sign In Button (inline, no CustomButton) ── */}
+          {/* ── Sign In Button ── */}
           <TouchableOpacity
             style={styles.signInButton}
             onPress={handleSignIn}
@@ -190,15 +284,22 @@ const SignInScreen = () => {
 
         {/* Google Sign In */}
         <TouchableOpacity 
-          style={styles.googleButton} 
+          style={[styles.googleButton, googleLoading && styles.googleButtonDisabled]} 
           onPress={handleGoogleSignIn}
           activeOpacity={0.8}
+          disabled={googleLoading}
         >
-          <Image
-            source={{ uri: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' }}
-            style={styles.googleIcon}
-          />
-          <Text style={styles.googleButtonText}>Continue with Google</Text>
+          {googleLoading ? (
+            <ActivityIndicator color={COLORS.textLight} size="small" />
+          ) : (
+            <>
+              <Image
+                source={{ uri: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' }}
+                style={styles.googleIcon}
+              />
+              <Text style={styles.googleButtonText}>Continue with Google</Text>
+            </>
+          )}
         </TouchableOpacity>
 
       </ScrollView>
@@ -332,7 +433,10 @@ const styles = StyleSheet.create({
     borderWidth: 1, 
     borderColor: '#E0E0E0', 
     borderRadius: 30, 
-    height: 58 
+    height: 58,
+  },
+  googleButtonDisabled: {
+    opacity: 0.7,
   },
   googleIcon: { 
     width: 22, 
