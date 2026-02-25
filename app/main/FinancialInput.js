@@ -1,27 +1,122 @@
 // app/(main)/financial.js
-// ═══════════════════════════════════════════════════════════════
-// FINANCIAL INPUT SCREEN
-// Users enter income, expenses, debts, employment info
-// Validates and saves to Firebase
-// ═══════════════════════════════════════════════════════════════
-
+import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
+import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
+  TouchableOpacity,
   View
 } from 'react-native';
-import CustomButton from '../../components/CustomButton';
-import CustomInput from '../../components/CustomInput';
+// CustomButton removed - using TouchableOpacity directly for full style control
 import FirebaseService from '../../services/FirebaseService';
 import UserFinancialProfile from '../../services/UserFinancialProfile';
-import COLORS from '../../utils/colors';
+
+// Theme configuration - Updated to match SignInScreen COLORS
+const THEME = {
+  primary: '#0A2540',       // Navy Blue
+  accent: '#2ECC71',         // Emerald Green
+  background: '#F5F7FA',     // Off-White
+  card: '#FFFFFF',           // Pure White
+  text: '#2C2C2C',           // Dark Gray
+  textLight: '#6B7280',     // Light Gray
+  inputBg: '#F5F7FA',        // Matches COLORS.background from SignIn
+  error: '#E53E3E',
+};
+
+// ─── Inline CustomInput ────────────────────────────────────────────────────────
+const CustomInput = ({
+  placeholder,
+  value,
+  onChangeText,
+  keyboardType = 'default',
+  secureTextEntry = false,
+  containerStyle,
+  error,
+  placeholderTextColor,
+  editable = true,
+  autoCapitalize = 'none',
+  autoCorrect = false,
+  onBlur,
+  onFocus,
+}) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+
+  const handleFocus = (e) => {
+    setIsFocused(true);
+    onFocus && onFocus(e);
+  };
+
+  const handleBlur = (e) => {
+    setIsFocused(false);
+    onBlur && onBlur(e);
+  };
+
+  const isSecure = secureTextEntry && !isPasswordVisible;
+
+  return (
+    <View style={{ width: '100%' }}>
+      <View
+        style={[
+          styles.inputContainer,
+          isFocused && styles.inputContainerFocused,
+          error && styles.inputContainerError,
+          !editable && styles.inputContainerDisabled,
+          containerStyle,
+        ]}
+      >
+        <TextInput
+          style={styles.input}
+          placeholder={placeholder}
+          placeholderTextColor={placeholderTextColor || THEME.textLight}
+          value={value}
+          onChangeText={onChangeText}
+          keyboardType={keyboardType}
+          secureTextEntry={isSecure}
+          editable={editable}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={autoCorrect}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          selectionColor={THEME.primary}
+        />
+
+        {secureTextEntry && (
+          <TouchableOpacity
+            style={styles.rightIconWrapper}
+            onPress={() => setIsPasswordVisible((prev) => !prev)}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={isPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
+              size={20}
+              color={THEME.textLight}
+            />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {error ? (
+        <View style={styles.errorRow}>
+          <Ionicons name="alert-circle-outline" size={13} color={THEME.error} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+};
+// ──────────────────────────────────────────────────────────────────────────────
 
 const FinancialInputScreen = () => {
-  // Form State
+  const router = useRouter();
+  
   const [formData, setFormData] = useState({
     monthlyIncome: '',
     monthlyExpenses: '',
@@ -31,7 +126,6 @@ const FinancialInputScreen = () => {
     requestedLoanAmount: '',
   });
 
-  // UI State
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [userData, setUserData] = useState(null);
@@ -40,9 +134,6 @@ const FinancialInputScreen = () => {
     loadExistingData();
   }, []);
 
-  /**
-   * Load existing financial data if available
-   */
   const loadExistingData = async () => {
     try {
       const user = FirebaseService.getCurrentUser();
@@ -66,73 +157,39 @@ const FinancialInputScreen = () => {
     }
   };
 
-  /**
-   * Update form field
-   */
   const updateField = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-    // Clear error when user types
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }));
     }
   };
 
-  /**
-   * Validate form
-   */
   const validateForm = () => {
     const newErrors = {};
-
-    // Monthly Income
     const income = parseFloat(formData.monthlyIncome);
-    if (!formData.monthlyIncome || isNaN(income) || income <= 0) {
-      newErrors.monthlyIncome = 'Please enter a valid monthly income';
-    }
-
-    // Monthly Expenses
     const expenses = parseFloat(formData.monthlyExpenses);
-    if (!formData.monthlyExpenses || isNaN(expenses) || expenses < 0) {
-      newErrors.monthlyExpenses = 'Please enter valid monthly expenses';
-    }
-
-    // Check if expenses exceed income
-    if (income > 0 && expenses > income) {
-      Alert.alert(
-        'Warning',
-        'Your expenses exceed your income. This will negatively impact your credit score.',
-        [{ text: 'OK' }]
-      );
-    }
-
-    // Existing Debts
     const debts = parseFloat(formData.existingDebts);
-    if (!formData.existingDebts || isNaN(debts) || debts < 0) {
-      newErrors.existingDebts = 'Please enter existing debts (enter 0 if none)';
-    }
-
-    // Employment Years
     const years = parseFloat(formData.employmentYears);
-    if (!formData.employmentYears || isNaN(years) || years < 0) {
-      newErrors.employmentYears = 'Please enter years of employment';
-    }
-
-    // Requested Loan Amount
     const loanAmount = parseFloat(formData.requestedLoanAmount);
-    if (!formData.requestedLoanAmount || isNaN(loanAmount) || loanAmount <= 0) {
-      newErrors.requestedLoanAmount = 'Please enter requested loan amount';
-    }
+
+    if (!formData.monthlyIncome || isNaN(income) || income <= 0) 
+      newErrors.monthlyIncome = 'Required';
+    if (!formData.monthlyExpenses || isNaN(expenses) || expenses < 0) 
+      newErrors.monthlyExpenses = 'Required';
+    if (!formData.existingDebts || isNaN(debts) || debts < 0) 
+      newErrors.existingDebts = 'Required';
+    if (!formData.employmentYears || isNaN(years) || years < 0) 
+      newErrors.employmentYears = 'Required';
+    if (!formData.requestedLoanAmount || isNaN(loanAmount) || loanAmount <= 0) 
+      newErrors.requestedLoanAmount = 'Required';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  /**
-   * Handle save
-   */
   const handleSave = async () => {
-    // Validate
     if (!validateForm()) {
-      Alert.alert('Validation Error', 'Please fix the errors in the form');
+      Alert.alert('Attention', 'Please complete all fields to calculate your score.');
       return;
     }
 
@@ -140,12 +197,8 @@ const FinancialInputScreen = () => {
 
     try {
       const user = FirebaseService.getCurrentUser();
-      if (!user) {
-        Alert.alert('Error', 'Please sign in again');
-        return;
-      }
+      if (!user) return;
 
-      // Create financial profile to validate
       const age = userData?.dateOfBirth 
         ? new Date().getFullYear() - new Date(userData.dateOfBirth).getFullYear()
         : 30;
@@ -160,7 +213,6 @@ const FinancialInputScreen = () => {
         requestedLoanAmount: parseFloat(formData.requestedLoanAmount),
       });
 
-      // Validate profile
       const validation = profile.validate();
       if (!validation.isValid) {
         Alert.alert('Validation Error', validation.errors.join('\n'));
@@ -168,7 +220,6 @@ const FinancialInputScreen = () => {
         return;
       }
 
-      // Save to Firebase
       const result = await FirebaseService.saveFinancialProfile(user.uid, {
         income: parseFloat(formData.monthlyIncome),
         expenses: parseFloat(formData.monthlyExpenses),
@@ -176,19 +227,17 @@ const FinancialInputScreen = () => {
         employment: formData.employmentType,
         employmentYears: parseFloat(formData.employmentYears),
         requestedLoanAmount: parseFloat(formData.requestedLoanAmount),
+        hasData: true,
       });
 
       if (result.success) {
         Alert.alert(
-          'Success',
-          'Financial profile saved successfully!',
-          [{ text: 'OK' }]
+          'Profile Updated',
+          'Your financial analysis is ready.',
+          [{ text: 'View Score', onPress: () => router.push('/main/CreditScore') }]
         );
-      } else {
-        Alert.alert('Error', result.error);
       }
     } catch (error) {
-      Alert.alert('Error', 'An unexpected error occurred');
       console.error('Save error:', error);
     } finally {
       setLoading(false);
@@ -196,197 +245,238 @@ const FinancialInputScreen = () => {
   };
 
   return (
-    <ScrollView 
-      style={styles.container}
-      contentContainerStyle={styles.contentContainer}
-      keyboardShouldPersistTaps="handled"
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1, backgroundColor: THEME.card }}
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Financial Information</Text>
-        <Text style={styles.subtitle}>
-          Enter your financial details to calculate credit score
-        </Text>
-      </View>
-
-      {/* Form */}
-      <View style={styles.form}>
-        {/* Monthly Income */}
-        <View style={styles.inputSection}>
-          <Text style={styles.label}>Monthly Income *</Text>
-          <CustomInput 
-            placeholder="5000"
-            value={formData.monthlyIncome}
-            onChangeText={(text) => updateField('monthlyIncome', text)}
-            keyboardType="numeric"
-            iconName="cash-outline"
-            error={errors.monthlyIncome}
-          />
+      <ScrollView 
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <Text style={styles.title}>Financial Profile</Text>
+          <Text style={styles.subtitle}>Enter your details for an AI credit assessment</Text>
         </View>
 
-        {/* Monthly Expenses */}
-        <View style={styles.inputSection}>
-          <Text style={styles.label}>Monthly Expenses *</Text>
-          <CustomInput 
-            placeholder="3000"
-            value={formData.monthlyExpenses}
-            onChangeText={(text) => updateField('monthlyExpenses', text)}
-            keyboardType="numeric"
-            iconName="trending-down-outline"
-            error={errors.monthlyExpenses}
-          />
-        </View>
+        <View style={styles.form}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Monthly Income</Text>
+            <CustomInput 
+              placeholder="Enter your Income"
+              value={formData.monthlyIncome}
+              onChangeText={(t) => updateField('monthlyIncome', t)}
+              keyboardType="numeric"
+              error={errors.monthlyIncome}
+            />
+          </View>
 
-        {/* Existing Debts */}
-        <View style={styles.inputSection}>
-          <Text style={styles.label}>Existing Debts *</Text>
-          <Text style={styles.helperText}>
-            Total outstanding debt (credit cards, loans, etc.)
-          </Text>
-          <CustomInput 
-            placeholder="10000"
-            value={formData.existingDebts}
-            onChangeText={(text) => updateField('existingDebts', text)}
-            keyboardType="numeric"
-            iconName="card-outline"
-            error={errors.existingDebts}
-          />
-        </View>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Monthly Expenses</Text>
+            <CustomInput 
+              placeholder="Enter your Expenses"
+              value={formData.monthlyExpenses}
+              onChangeText={(t) => updateField('monthlyExpenses', t)}
+              keyboardType="numeric"
+              error={errors.monthlyExpenses}
+            />
+          </View>
 
-        {/* Employment Type */}
-        <View style={styles.inputSection}>
-          <Text style={styles.label}>Employment Type *</Text>
-          <View style={styles.pickerContainer}>
-            <Picker
-              selectedValue={formData.employmentType}
-              onValueChange={(value) => updateField('employmentType', value)}
-              style={styles.picker}
-            >
-              <Picker.Item label="Permanent Employment" value="permanent" />
-              <Picker.Item label="Contract Employment" value="contract" />
-              <Picker.Item label="Self-Employed" value="self-employed" />
-              <Picker.Item label="Unemployed" value="unemployed" />
-            </Picker>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Total Existing Debts</Text>
+            <CustomInput 
+              placeholder="Enter total debt"
+              value={formData.existingDebts}
+              onChangeText={(t) => updateField('existingDebts', t)}
+              keyboardType="numeric"
+              error={errors.existingDebts}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Employment Type</Text>
+            <View style={[
+              styles.inputContainer,
+              { paddingHorizontal: 8, backgroundColor: 'transparent', borderWidth: 0, borderColor: 'transparent' }
+            ]}>
+              <Picker
+                selectedValue={formData.employmentType}
+                onValueChange={(v) => updateField('employmentType', v)}
+                style={styles.picker}
+                dropdownIconColor={THEME.textLight}
+              >
+                <Picker.Item label="Permanent" value="permanent" />
+                <Picker.Item label="Contract" value="contract" />
+                <Picker.Item label="Self-Employed" value="self-employed" />
+                <Picker.Item label="Unemployed" value="unemployed" />
+              </Picker>
+            </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Employment Years</Text>
+            <CustomInput 
+              placeholder="How many years?"
+              value={formData.employmentYears}
+              onChangeText={(t) => updateField('employmentYears', t)}
+              keyboardType="numeric"
+              error={errors.employmentYears}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Loan Amount Requested</Text>
+            <CustomInput 
+              placeholder="Enter amount"
+              value={formData.requestedLoanAmount}
+              onChangeText={(t) => updateField('requestedLoanAmount', t)}
+              keyboardType="numeric"
+              error={errors.requestedLoanAmount}
+            />
           </View>
         </View>
 
-        {/* Employment Years */}
-        <View style={styles.inputSection}>
-          <Text style={styles.label}>Years of Employment *</Text>
-          <CustomInput 
-            placeholder="5"
-            value={formData.employmentYears}
-            onChangeText={(text) => updateField('employmentYears', text)}
-            keyboardType="numeric"
-            iconName="briefcase-outline"
-            error={errors.employmentYears}
-          />
+        <TouchableOpacity
+          style={styles.pillButton}
+          onPress={handleSave}
+          disabled={loading}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.pillButtonText}>
+            {loading ? 'Saving...' : 'Save & Calculate Score'}
+          </Text>
+        </TouchableOpacity>
+        
+        <View style={styles.secureFooter}>
+          <Ionicons name="lock-closed" size={14} color={THEME.textLight} />
+          <Text style={styles.footerText}>Secure AI Processing</Text>
         </View>
-
-        {/* Requested Loan Amount */}
-        <View style={styles.inputSection}>
-          <Text style={styles.label}>Requested Loan Amount *</Text>
-          <CustomInput 
-            placeholder="50000"
-            value={formData.requestedLoanAmount}
-            onChangeText={(text) => updateField('requestedLoanAmount', text)}
-            keyboardType="numeric"
-            iconName="wallet-outline"
-            error={errors.requestedLoanAmount}
-          />
-        </View>
-      </View>
-
-      {/* Info Box */}
-      <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>💡 Why we need this information:</Text>
-        <Text style={styles.infoText}>
-          • Calculate your debt-to-income ratio{'\n'}
-          • Assess employment stability{'\n'}
-          • Determine loan eligibility{'\n'}
-          • Provide accurate credit score
-        </Text>
-      </View>
-
-      {/* Save Button */}
-      <CustomButton 
-        title="Save & Calculate Score"
-        onPress={handleSave}
-        loading={loading}
-        style={styles.saveButton}
-      />
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
   contentContainer: {
-    padding: 20,
+    paddingHorizontal: 25,
+    paddingTop: 40,
+    paddingBottom: 30,
   },
   header: {
     marginBottom: 30,
-    marginTop: 20,
   },
   title: {
-    fontSize: 28,
+    fontSize: 34,
     fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 8,
+    color: THEME.text,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 14,
-    color: COLORS.textLight,
+    fontSize: 16,
+    color: THEME.textLight,
+    marginTop: 8,
   },
   form: {
-    marginBottom: 20,
+    width: '100%',
   },
-  inputSection: {
-    marginBottom: 20,
+  inputGroup: {
+    marginBottom: 16,
   },
   label: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.text,
+    color: THEME.primary,
     marginBottom: 8,
+    marginLeft: 4,
   },
-  helperText: {
+  // ── Shared input container (pill shape matching screenshot) ──
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: THEME.inputBg,
+    borderRadius: 30,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    height: 58,
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  inputContainerFocused: {
+    borderColor: 'transparent',
+    backgroundColor: THEME.card,
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  inputContainerError: {
+    borderColor: THEME.error,
+    backgroundColor: '#FFF5F5',
+  },
+  inputContainerDisabled: {
+    opacity: 0.55,
+  },
+  input: {
+    flex: 1,
+    fontSize: 15,
+    color: THEME.text,
+    fontWeight: '400',
+    paddingVertical: 0,
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineStyle: 'none',
+  },
+  rightIconWrapper: {
+    padding: 4,
+    marginLeft: 4,
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    marginLeft: 6,
+  },
+  errorText: {
     fontSize: 12,
-    color: COLORS.textLight,
-    marginBottom: 8,
-  },
-  pickerContainer: {
-    backgroundColor: COLORS.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    overflow: 'hidden',
+    color: THEME.error,
+    marginLeft: 4,
+    fontWeight: '500',
   },
   picker: {
-    height: 50,
+    flex: 1,
+    color: THEME.text,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineStyle: 'none',
   },
-  infoBox: {
-    backgroundColor: COLORS.primary + '10',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
+  // ── Button ──
+  pillButton: {
+    backgroundColor: THEME.accent,
+    borderRadius: 30,
+    height: 58,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 20,
   },
-  infoTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.primary,
-    marginBottom: 8,
+  pillButtonText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
-  infoText: {
-    fontSize: 13,
-    color: COLORS.primary,
-    lineHeight: 20,
+  secureFooter: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 25,
   },
-  saveButton: {
-    marginBottom: 40,
+  footerText: {
+    fontSize: 12,
+    color: THEME.textLight,
+    marginLeft: 5,
+    fontWeight: '500',
   },
 });
 
