@@ -14,6 +14,7 @@ import {
   Text,
   View
 } from 'react-native';
+import RiskChart from '../../components/RiskChart';
 import CreditScoreCalculator from '../../services/CreditScoreCalculator';
 import FirebaseService from '../../services/FirebaseService';
 import LoanDecisionService from '../../services/LoanDecisionService';
@@ -26,6 +27,7 @@ const CreditScoreScreen = () => {
   const [userData, setUserData] = useState(null);
   const [scoreResult, setScoreResult] = useState(null);
   const [loanDecision, setLoanDecision] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,8 +44,6 @@ const CreditScoreScreen = () => {
         const result = await FirebaseService.getUserData(user.uid);
         if (result.success) {
           setUserData(result.data);
-
-          // Check if financial data exists
           if (result.data.financialProfile?.hasData) {
             calculateScore(result.data);
           }
@@ -61,13 +61,11 @@ const CreditScoreScreen = () => {
    */
   const calculateScore = (data) => {
     try {
-      // Calculate age from date of birth
-      const age = data.dateOfBirth 
+      const age = data.dateOfBirth
         ? new Date().getFullYear() - new Date(data.dateOfBirth).getFullYear()
         : 30;
 
-      // Create financial profile
-      const profile = new UserFinancialProfile({
+      const userProfile = new UserFinancialProfile({
         monthlyIncome: data.financialProfile.income,
         monthlyExpenses: data.financialProfile.expenses,
         existingDebts: data.financialProfile.debts,
@@ -77,14 +75,14 @@ const CreditScoreScreen = () => {
         requestedLoanAmount: data.financialProfile.requestedLoanAmount,
       });
 
-      // Calculate score
+      setProfile(userProfile);
+
       const calculator = new CreditScoreCalculator();
-      const result = calculator.calculateScore(profile);
+      const result = calculator.calculateScore(userProfile);
       setScoreResult(result);
 
-      // Make loan decision
       const decisionService = new LoanDecisionService();
-      const decision = decisionService.makeDecision(profile);
+      const decision = decisionService.makeDecision(userProfile);
       setLoanDecision(decision);
 
     } catch (error) {
@@ -114,31 +112,34 @@ const CreditScoreScreen = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      {/* Header */}
+
+      {/* ── Header ─────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.title}>Credit Score Analysis</Text>
         <Text style={styles.subtitle}>AI-Powered Assessment</Text>
       </View>
 
-      {/* Credit Score Card */}
+      {/* ── Score Card ─────────────────────────────────────── */}
       {scoreResult && (
         <View style={styles.scoreCard}>
           <Text style={styles.scoreLabel}>Your Credit Score</Text>
-          <Text style={styles.scoreValue}>{scoreResult.score}</Text>
+          <Text style={[styles.scoreValue, { color: getRiskColor(scoreResult.riskLevel) }]}>
+            {scoreResult.score}
+          </Text>
           <Text style={styles.scoreRating}>{scoreResult.rating}</Text>
-          
+
           <View style={styles.scoreBar}>
-            <View 
+            <View
               style={[
-                styles.scoreProgress, 
-                { 
+                styles.scoreProgress,
+                {
                   width: `${((scoreResult.score - 300) / 550) * 100}%`,
-                  backgroundColor: getRiskColor(scoreResult.riskLevel)
-                }
-              ]} 
+                  backgroundColor: getRiskColor(scoreResult.riskLevel),
+                },
+              ]}
             />
           </View>
-          
+
           <View style={styles.scoreRange}>
             <Text style={styles.rangeText}>300</Text>
             <Text style={styles.rangeText}>850</Text>
@@ -146,37 +147,26 @@ const CreditScoreScreen = () => {
         </View>
       )}
 
-      {/* Risk Assessment */}
+      {/* ── RISK CHART ─────────────────────────────────────── */}
       {scoreResult && (
-        <View style={styles.riskCard}>
-          <View style={styles.riskHeader}>
-            <Ionicons 
-              name="shield-checkmark" 
-              size={24} 
-              color={getRiskColor(scoreResult.riskLevel)} 
-            />
-            <Text style={styles.riskTitle}>Risk Level</Text>
-          </View>
-          <Text style={[
-            styles.riskLevel, 
-            { color: getRiskColor(scoreResult.riskLevel) }
-          ]}>
-            {scoreResult.riskLevel}
-          </Text>
-        </View>
+        <RiskChart
+          scoreResult={scoreResult}
+          loanDecision={loanDecision}
+          profile={profile}
+        />
       )}
 
-      {/* Loan Decision */}
+      {/* ── Loan Decision ──────────────────────────────────── */}
       {loanDecision && (
         <View style={[
           styles.decisionCard,
           { borderColor: loanDecision.approved ? COLORS.success : COLORS.error }
         ]}>
           <View style={styles.decisionHeader}>
-            <Ionicons 
-              name={loanDecision.approved ? "checkmark-circle" : "close-circle"} 
-              size={32} 
-              color={loanDecision.approved ? COLORS.success : COLORS.error} 
+            <Ionicons
+              name={loanDecision.approved ? 'checkmark-circle' : 'close-circle'}
+              size={32}
+              color={loanDecision.approved ? COLORS.success : COLORS.error}
             />
             <Text style={[
               styles.decisionTitle,
@@ -185,27 +175,27 @@ const CreditScoreScreen = () => {
               {loanDecision.approved ? 'Loan Approved' : 'Loan Not Approved'}
             </Text>
           </View>
-          
+
           <View style={styles.confidenceBar}>
             <Text style={styles.confidenceLabel}>
               Approval Probability: {loanDecision.confidence}%
             </Text>
             <View style={styles.confidenceBarContainer}>
-              <View 
+              <View
                 style={[
                   styles.confidenceProgress,
-                  { 
+                  {
                     width: `${loanDecision.confidence}%`,
-                    backgroundColor: loanDecision.approved ? COLORS.success : COLORS.error
-                  }
-                ]} 
+                    backgroundColor: loanDecision.approved ? COLORS.success : COLORS.error,
+                  },
+                ]}
               />
             </View>
           </View>
         </View>
       )}
 
-      {/* Score Breakdown */}
+      {/* ── Score Breakdown ────────────────────────────────── */}
       {scoreResult?.breakdown && (
         <View style={styles.breakdownCard}>
           <Text style={styles.sectionTitle}>Score Breakdown</Text>
@@ -226,7 +216,7 @@ const CreditScoreScreen = () => {
         </View>
       )}
 
-      {/* Loan Recommendations */}
+      {/* ── Loan Recommendations (Approved) ───────────────── */}
       {loanDecision?.approved && loanDecision.recommendations && (
         <View style={styles.recommendationsCard}>
           <Text style={styles.sectionTitle}>Loan Recommendations</Text>
@@ -239,15 +229,9 @@ const CreditScoreScreen = () => {
                 <Text style={styles.loanType}>{rec.type}</Text>
                 <Text style={styles.loanDescription}>{rec.description}</Text>
                 <View style={styles.loanDetails}>
-                  <Text style={styles.loanDetail}>
-                    Max: ${rec.maxAmount.toLocaleString()}
-                  </Text>
-                  <Text style={styles.loanDetail}>
-                    Rate: {rec.interestRate}
-                  </Text>
-                  <Text style={styles.loanDetail}>
-                    Term: {rec.term}
-                  </Text>
+                  <Text style={styles.loanDetail}>Max: ${rec.maxAmount.toLocaleString()}</Text>
+                  <Text style={styles.loanDetail}>Rate: {rec.interestRate}</Text>
+                  <Text style={styles.loanDetail}>Term: {rec.term}</Text>
                 </View>
               </View>
             </View>
@@ -255,7 +239,7 @@ const CreditScoreScreen = () => {
         </View>
       )}
 
-      {/* Improvement Recommendations (if not approved) */}
+      {/* ── Improvement Tips (Declined) ────────────────────── */}
       {!loanDecision?.approved && loanDecision?.recommendations && (
         <View style={styles.improvementCard}>
           <Text style={styles.sectionTitle}>How to Improve</Text>
@@ -276,34 +260,31 @@ const CreditScoreScreen = () => {
         </View>
       )}
 
-      {/* Explanation Section */}
+      {/* ── AI Explanation ─────────────────────────────────── */}
       {loanDecision?.reasons && (
         <View style={styles.explanationCard}>
           <Text style={styles.sectionTitle}>AI Explanation</Text>
           {loanDecision.reasons.map((reason, index) => (
             <View key={index} style={styles.reasonItem}>
-              <Ionicons 
-                name="information-circle-outline" 
-                size={20} 
-                color={COLORS.primary} 
-              />
+              <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} />
               <Text style={styles.reasonText}>{reason}</Text>
             </View>
           ))}
         </View>
       )}
+
     </ScrollView>
   );
 };
 
-// Helper functions
+// ── Helpers ───────────────────────────────────────────────────
 const getRiskColor = (riskLevel) => {
   const colors = {
-    'Very Low': COLORS.success,
-    'Low': '#27AE60',
-    'Moderate': COLORS.warning,
-    'High': '#E67E22',
-    'Very High': COLORS.error
+    'Very Low': '#2ECC71',
+    'Low':      '#27AE60',
+    'Moderate': '#F39C12',
+    'High':     '#E67E22',
+    'Very High':'#E74C3C',
   };
   return colors[riskLevel] || COLORS.textLight;
 };
@@ -315,7 +296,7 @@ const getImpactColor = (impact) => {
 };
 
 const getPriorityColor = (priority) => {
-  if (priority === 'high') return COLORS.error;
+  if (priority === 'high')   return COLORS.error;
   if (priority === 'medium') return COLORS.warning;
   return COLORS.info;
 };
@@ -392,7 +373,6 @@ const styles = StyleSheet.create({
   scoreValue: {
     fontSize: 72,
     fontWeight: 'bold',
-    color: COLORS.primary,
     marginBottom: 8,
   },
   scoreRating: {
@@ -421,33 +401,6 @@ const styles = StyleSheet.create({
   rangeText: {
     fontSize: 12,
     color: COLORS.textLight,
-  },
-  riskCard: {
-    backgroundColor: COLORS.white,
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 16,
-    elevation: 2,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-  },
-  riskHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  riskTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginLeft: 12,
-  },
-  riskLevel: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
   },
   decisionCard: {
     backgroundColor: COLORS.white,
@@ -566,9 +519,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 16,
   },
-  loanContent: {
-    flex: 1,
-  },
+  loanContent: { flex: 1 },
   loanType: {
     fontSize: 16,
     fontWeight: '600',
@@ -617,9 +568,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: COLORS.white,
   },
-  improvementContent: {
-    flex: 1,
-  },
+  improvementContent: { flex: 1 },
   improvementTitle: {
     fontSize: 15,
     fontWeight: '600',

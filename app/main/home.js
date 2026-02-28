@@ -38,20 +38,33 @@ const HomeScreen = () => {
     loadUserData();
   }, []);
 
-  const loadUserData = async () => {
+  const loadUserData = async (retryCount = 0) => {
     try {
       const user = FirebaseService.getCurrentUser();
       if (user) {
         const result = await FirebaseService.getUserData(user.uid);
-        if (result.success) {
+        if (result.success && result.data?.firstName) {
+          // Data loaded successfully with a real name
           setUserData(result.data);
+        } else if (retryCount < 5) {
+          // Firestore write may not be complete yet — wait 1 second and retry
+          setTimeout(() => loadUserData(retryCount + 1), 1000);
+          return; // Don't call setLoading(false) yet, keep showing loader
+        } else {
+          // After 5 retries, show whatever data we have (even if incomplete)
+          if (result.success) {
+            setUserData(result.data);
+          }
         }
       }
     } catch (error) {
       console.error('Error loading user data:', error);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      // Only stop loading if we're not going to retry
+      if (retryCount === 0 || retryCount >= 5) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
@@ -61,12 +74,12 @@ const HomeScreen = () => {
    */
   const getAvatarColor = (name) => {
     const colors = [
-      '#FF5733', '#33FF57', '#3357FF', '#F333FF', 
+      '#FF5733', '#33FF57', '#3357FF', '#F333FF',
       '#33FFF3', '#F3FF33', '#FF3385', '#8E44AD',
       '#2980B9', '#27AE60', '#E67E22', '#F1C40F'
     ];
     if (!name) return '#8E44AD'; // Default purple if no name
-    
+
     let hash = 0;
     for (let i = 0; i < name.length; i++) {
       hash = name.charCodeAt(i) + ((hash << 5) - hash);
@@ -99,7 +112,7 @@ const HomeScreen = () => {
   const hasFinancialData = userData?.financialProfile?.hasData || false;
 
   return (
-    <ScrollView 
+    <ScrollView
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
       showsVerticalScrollIndicator={false}
@@ -113,12 +126,12 @@ const HomeScreen = () => {
           <Text style={styles.greeting}>{getGreeting()},</Text>
           <Text style={styles.userName}>{userData?.firstName || 'User'}</Text>
         </View>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => router.push('/main/Profile')}
           style={styles.avatarContainer}
         >
-          <UserAvatar 
-            name={userData?.firstName || 'User'} 
+          <UserAvatar
+            name={userData?.firstName || 'User'}
             size={50}
             backgroundColor={getAvatarColor(userData?.firstName)} // Dynamically passed color
           />
@@ -126,7 +139,7 @@ const HomeScreen = () => {
       </View>
 
       {/* Main Action Card (Centerpiece) */}
-      <TouchableOpacity 
+      <TouchableOpacity
         style={[styles.actionCard, { backgroundColor: THEME.primary }]}
         onPress={() => router.push(hasFinancialData ? '/main/CreditScore' : '/main/FinancialInput')}
       >
@@ -139,8 +152,8 @@ const HomeScreen = () => {
               {hasFinancialData ? "Credit Analysis" : "Financial Profile"}
             </Text>
             <Text style={styles.actionSubtitle}>
-              {hasFinancialData 
-                ? "View your risk assessment" 
+              {hasFinancialData
+                ? "View your risk assessment"
                 : "Complete profile for AI score"}
             </Text>
           </View>
@@ -151,17 +164,17 @@ const HomeScreen = () => {
       {/* Quick Stats Grid */}
       {hasFinancialData && (
         <View style={styles.statsGrid}>
-          <StatCard 
+          <StatCard
             icon="cash-outline"
             title="Income"
             value={'$' + (userData?.financialProfile?.income || 0).toLocaleString()}
             color={THEME.accent}
           />
-          <StatCard 
+          <StatCard
             icon="trending-down-outline"
             title="Expenses"
             value={'$' + (userData?.financialProfile?.expenses || 0).toLocaleString()}
-            color="#E74C3C" // Subtle red for expenses
+            color="#E74C3C"
           />
         </View>
       )}
@@ -171,17 +184,17 @@ const HomeScreen = () => {
         <Text style={styles.sectionTitle}>Dashboard Links</Text>
       </View>
 
-      <FeatureItem 
-        icon="analytics-outline" 
-        title="View Detailed Credit Analysis" 
-        onPress={() => router.push('/main/CreditScore')} 
+      <FeatureItem
+        icon="analytics-outline"
+        title="View Detailed Credit Analysis"
+        onPress={() => router.push('/main/CreditScore')}
         accentColor={THEME.primary}
       />
-      
-      <FeatureItem 
-        icon="person-outline" 
-        title="Manage User Profile" 
-        onPress={() => router.push('/main/Profile')} 
+
+      <FeatureItem
+        icon="person-outline"
+        title="Manage User Profile"
+        onPress={() => router.push('/main/Profile')}
         accentColor={THEME.primary}
       />
 
@@ -211,30 +224,30 @@ const FeatureItem = ({ icon, title, onPress, accentColor }) => (
 );
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#F5F7FA' 
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F7FA'
   },
-  contentContainer: { 
-    paddingHorizontal: 20, 
-    paddingTop: 60, 
+  contentContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 60,
     paddingBottom: 40,
-    alignItems: 'center' 
+    alignItems: 'center'
   },
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F5F7FA'
   },
   loadingText: { marginTop: 12, fontWeight: '500' },
-  
-  header: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
-    marginBottom: 30 
+    marginBottom: 30
   },
   greeting: { fontSize: 16, color: '#6B7280' },
   userName: { fontSize: 28, fontWeight: '800', color: '#2C2C2C', marginTop: 2 },
@@ -245,9 +258,9 @@ const styles = StyleSheet.create({
     elevation: 3
   },
 
-  actionCard: { 
+  actionCard: {
     width: '100%',
-    borderRadius: 20, 
+    borderRadius: 20,
     padding: 24,
     marginBottom: 25,
     elevation: 8,
@@ -256,9 +269,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 10
   },
-  actionCardContent: { 
-    flexDirection: 'row', 
-    alignItems: 'center' 
+  actionCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center'
   },
   iconCircle: {
     width: 56,
@@ -272,17 +285,17 @@ const styles = StyleSheet.create({
   actionTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   actionSubtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 4 },
 
-  statsGrid: { 
-    flexDirection: 'row', 
+  statsGrid: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    gap: 15, 
-    marginBottom: 30 
+    gap: 15,
+    marginBottom: 30
   },
-  statCard: { 
-    flex: 1, 
-    backgroundColor: '#FFFFFF', 
-    padding: 20, 
+  statCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    padding: 20,
     borderRadius: 16,
     alignItems: 'center',
     elevation: 2,
@@ -299,13 +312,13 @@ const styles = StyleSheet.create({
 
   sectionHeader: { width: '100%', marginBottom: 15 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: '#2C2C2C' },
-  linkRow: { 
+  linkRow: {
     width: '100%',
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#FFFFFF', 
-    padding: 16, 
-    borderRadius: 16, 
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: 16,
     marginBottom: 12,
     elevation: 1
   },
