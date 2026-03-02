@@ -20,17 +20,42 @@ const RISK_COLORS = {
   'Very High':'#E74C3C',
 };
 
+// ── Zone segments with flex proportional to actual score ranges ──
+// Total range: 300–850 = 550 points
+// Very High: 300–549 = 249 pts  → flex ≈ 249/550
+// High:      550–579 = 30 pts   → flex ≈ 30/550
+// Moderate:  580–649 = 70 pts   → flex ≈ 70/550
+// Low:       650–749 = 100 pts  → flex ≈ 100/550
+// Very Low:  750–850 = 101 pts  → flex ≈ 101/550
+// Using multiplied values for readability (×550):
 const ZONE_SEGMENTS = [
-  { label: 'Very High', color: '#E74C3C', range: '300–549',  flex: 1 },
-  { label: 'High',      color: '#E67E22', range: '550–599',  flex: 0.5 },
-  { label: 'Moderate',  color: '#F39C12', range: '600–649',  flex: 0.5 },
-  { label: 'Low',       color: '#27AE60', range: '650–699',  flex: 0.5 },
-  { label: 'Very Low',  color: '#2ECC71', range: '700–850',  flex: 1.5 },
+  { label: 'Very High', color: '#E74C3C', range: '300–549',  flex: 249 },
+  { label: 'High',      color: '#E67E22', range: '550–579',  flex: 30  },
+  { label: 'Moderate',  color: '#F39C12', range: '580–649',  flex: 70  },
+  { label: 'Low',       color: '#27AE60', range: '650–749',  flex: 100 },
+  { label: 'Very Low',  color: '#2ECC71', range: '750–850',  flex: 101 },
 ];
 
-// ── Score → position on zone bar (300–850) ───────────────────
+// ── Score → percentage position on zone bar (300–850 range) ──────
+// Returns 0–100 where 0 = score of 300, 100 = score of 850
 const scoreToPercent = (score) =>
   Math.min(100, Math.max(0, ((score - 300) / 550) * 100));
+
+// ── DTI classification helpers (Egyptian banking standards) ───────
+// ≤ 30%     → Positive / Ideal       → Green  (#2ECC71)
+// 31%–40%   → Neutral  / Acceptable  → Orange (#F39C12)
+// > 40%     → Negative / High        → Red    (#E74C3C)
+const getDTIColor = (dti) => {
+  if (dti <= 30) return '#2ECC71';
+  if (dti <= 40) return '#F39C12';
+  return '#E74C3C';
+};
+
+const getDTISublabel = (dti) => {
+  if (dti <= 30) return 'Ideal';
+  if (dti <= 40) return 'Acceptable';
+  return 'High';
+};
 
 // ── Single animated bar ───────────────────────────────────────
 const AnimatedBar = ({ value, maxValue, color, delay = 0 }) => {
@@ -152,38 +177,53 @@ const ZoneBar = ({ score }) => {
     }).start();
   }, [pct]);
 
+  // Pointer half-width is 3px. We clamp so it never overflows the bar.
+  // At 0% we clamp left to 0, at 100% we clamp to 100% minus the pointer width.
+  const POINTER_WIDTH = 6;
+
   return (
     <View style={{ marginTop: 6 }}>
-      {/* Segments */}
+      {/* Segments — flex values are proportional to actual score ranges */}
       <View style={{ flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden' }}>
         {ZONE_SEGMENTS.map((seg) => (
           <View key={seg.label} style={{ flex: seg.flex, backgroundColor: seg.color }} />
         ))}
       </View>
 
-      {/* Pointer */}
-      <Animated.View
-        style={{
-          position: 'absolute',
-          top: -4,
-          left: anim.interpolate({
-            inputRange: [0, 100],
-            outputRange: ['0%', '95%'],
-          }),
-          width: 6,
-          height: 22,
-          backgroundColor: '#0A2540',
-          borderRadius: 3,
-          marginLeft: -3,
-        }}
-      />
+      {/* Pointer — rendered OUTSIDE the bar so overflow: hidden doesn't clip it */}
+      <View style={{ position: 'relative', height: 22, marginTop: -22 }} pointerEvents="none">
+        <Animated.View
+          style={{
+            position: 'absolute',
+            top: 0,
+            // Translate so the centre of the pointer aligns with the score position.
+            // We subtract half the pointer width (3px) to centre it.
+            left: anim.interpolate({
+              inputRange:  [0,   100],
+              outputRange: ['0%', '100%'],
+              extrapolate: 'clamp',
+            }),
+            width: POINTER_WIDTH,
+            height: 22,
+            backgroundColor: '#0A2540',
+            borderRadius: 3,
+            // Shift left by half pointer width to centre on the score position
+            marginLeft: -(POINTER_WIDTH / 2),
+          }}
+        />
+      </View>
 
-      {/* Range labels */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+      {/* Range labels — positioned to match segment boundaries */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
         <Text style={zoneStyles.rangeLabel}>300</Text>
-        <Text style={zoneStyles.rangeLabel}>550</Text>
-        <Text style={zoneStyles.rangeLabel}>650</Text>
-        <Text style={zoneStyles.rangeLabel}>700</Text>
+        {/* 550 is at (249/550)*100 ≈ 45.27% from left */}
+        <Text style={[zoneStyles.rangeLabel, { position: 'absolute', left: '45.27%' }]}>550</Text>
+        {/* 580 is at (280/550)*100 ≈ 50.9% from left */}
+        <Text style={[zoneStyles.rangeLabel, { position: 'absolute', left: '50.9%' }]}>580</Text>
+        {/* 650 is at (350/550)*100 ≈ 63.6% from left */}
+        <Text style={[zoneStyles.rangeLabel, { position: 'absolute', left: '63.6%' }]}>650</Text>
+        {/* 750 is at (450/550)*100 ≈ 81.8% from left */}
+        <Text style={[zoneStyles.rangeLabel, { position: 'absolute', left: '81.8%' }]}>750</Text>
         <Text style={zoneStyles.rangeLabel}>850</Text>
       </View>
 
@@ -276,11 +316,14 @@ const RiskChart = ({ scoreResult, loanDecision, profile }) => {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>🔢 Key Metrics</Text>
         <View style={styles.ringsRow}>
+          {/* FIX: DTI ring uses getDTIColor() and getDTISublabel()
+              matching Egyptian banking thresholds:
+              ≤ 30% = Ideal (green), 31–40% = Acceptable (orange), >40% = High (red) */}
           <RingIndicator
             percent={Math.min(100, dtiRaw)}
-            color={dtiRaw < 20 ? '#2ECC71' : dtiRaw < 36 ? '#F39C12' : '#E74C3C'}
+            color={getDTIColor(dtiRaw)}
             label="Debt-to-Income"
-            sublabel={dtiRaw < 36 ? 'Good' : 'High'}
+            sublabel={getDTISublabel(dtiRaw)}
           />
           <RingIndicator
             percent={Math.min(100, savingsRaw * 3)}
@@ -385,10 +428,10 @@ const RiskChart = ({ scoreResult, loanDecision, profile }) => {
             ))}
           </View>
 
-          {/* Pointer */}
+          {/* Pointer — clamped between 2% and 95% to stay visible */}
           <View style={[
             styles.healthPointer,
-            { left: `${Math.min(95, scoreToPercent(score))}%` }
+            { left: `${Math.min(95, Math.max(2, scoreToPercent(score)))}%` }
           ]}>
             <View style={[styles.healthPointerDot, { backgroundColor: riskColor }]} />
             <Text style={[styles.healthPointerLabel, { color: riskColor }]}>{score}</Text>
@@ -545,7 +588,7 @@ const styles = StyleSheet.create({
   },
   // Health bar
   healthBarWrapper: {
-    height: 20,
+    height: 30,
     borderRadius: 10,
     overflow: 'visible',
     marginBottom: 6,

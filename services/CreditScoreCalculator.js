@@ -147,7 +147,10 @@ class CreditScoreCalculator {
       dti: {
         value: profile.calculateDTI().toFixed(2) + '%',
         label: 'Debt-to-Income Ratio',
-        impact: this.getImpactLevel(profile.calculateDTI(), [20, 36, 50])
+        // FIX: thresholds changed from [20, 36, 50] → [30, 40, 50]
+        // so that 31–40% = Neutral (Acceptable) per Egyptian banking standards
+        // ≤30% = Positive (Ideal), 31–40% = Neutral (Acceptable), >40% = Negative (High)
+        impact: this.getDTIImpact(profile.calculateDTI())
       },
       income: {
         value: '$' + profile.monthlyIncome.toLocaleString(),
@@ -170,6 +173,20 @@ class CreditScoreCalculator {
         impact: this.getAgeImpact(profile.age)
       }
     };
+  }
+
+  /**
+   * Get DTI impact using Egyptian banking thresholds
+   * ≤ 30%      → Positive  (Ideal — excellent repayment ability)
+   * 31% – 40%  → Neutral   (Acceptable — moderate risk, still approvable)
+   * > 40%      → Negative  (High — risky, likely rejected)
+   * @param {number} dti - DTI percentage value
+   * @returns {string} - Impact level
+   */
+  getDTIImpact(dti) {
+    if (dti <= 30) return 'Positive';
+    if (dti <= 40) return 'Neutral';
+    return 'Negative';
   }
 
   /**

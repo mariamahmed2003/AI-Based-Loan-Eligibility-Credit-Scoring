@@ -1,344 +1,309 @@
 // app/services/LoanDecisionService.js
 // ═══════════════════════════════════════════════════════════════
-// LOAN DECISION SERVICE
-// SOLID: Single Responsibility - Handles loan approval decisions only
-// Provides explainable AI output for loan decisions
+// LOAN DECISION SERVICE — OpenAI + Egyptian Banking Rules
+// Flow:
+//   1. Check Egyptian hard eligibility (age, income, employment, DTI)
+//   2. Call OpenAI for real AI prediction
+//   3. If OpenAI fails → use rule-based fallback (CreditScoreCalculator)
+//   4. Return unified result object consumed by credit.js + RiskChart
 // ═══════════════════════════════════════════════════════════════
 
 import CreditScoreCalculator from './CreditScoreCalculator';
+import { predictLoanEligibility } from './OpenAiService';
 import { AIBasedStrategy } from './ScoringStrategy';
 
-/**
- * Loan Decision Service Class
- * Makes loan approval decisions based on credit score and other factors
- * Provides explainable AI reasoning
- */
 class LoanDecisionService {
   constructor() {
-    // Use AI-Based strategy for decisions
-    this.calculator = new CreditScoreCalculator(new AIBasedStrategy());
+    this.calculator         = new CreditScoreCalculator(new AIBasedStrategy());
+    this.APPROVAL_THRESHOLD = 580;
+    this.MIN_INCOME_EGP     = 10000;
+    this.MAX_DTI            = 50;
   }
 
   /**
-   * Make loan decision
-   * @param {UserFinancialProfile} profile - User's financial profile
-   * @returns {object} - Decision with explanation
+   * Main entry point — async because it calls OpenAI
+   * @param {UserFinancialProfile} profile
+   * @returns {Promise<object>} unified decision object
    */
-  makeDecision(profile) {
-    // Calculate credit score
-    const scoreResult = this.calculator.calculateScore(profile);
+  async makeDecision(profile) {
 
-    if (!scoreResult.success) {
+    // ── Step 1: Egyptian hard eligibility ─────────────────────
+    const eligibilityIssues = profile.getEgyptianEligibilityIssues
+      ? profile.getEgyptianEligibilityIssues()
+      : this._fallbackEligibility(profile);
+
+    if (eligibilityIssues.length > 0) {
       return {
-        approved: false,
-        confidence: 0,
-        score: 300,
-        reasons: scoreResult.errors,
-        recommendations: this.getImprovementRecommendations(profile)
+        approved:          false,
+        confidence:        0,
+        score:             300,
+        riskLevel:         'Very High',
+        rating:            'Poor',
+        hardReject:        true,
+        hardRejectReasons: eligibilityIssues,
+        reasons: [
+          '❌ Personal Loan DENIED — Egyptian bank eligibility requirements not met',
+          ...eligibilityIssues,
+        ],
+        positiveFactors:   [],
+        negativeFactors:   eligibilityIssues,
+        recommendations:   this._buildImprovementRecs(profile),
+        interestRateRange: [0, 0],
+        maxLoanAmount:     0,
+        breakdown:         this._buildFallbackBreakdown(profile),
+        financialHealthSummary: profile.getFinancialHealthSummary
+          ? profile.getFinancialHealthSummary()
+          : 'Poor financial health',
+        source: 'eligibility-check',
       };
     }
 
-    const { score, riskLevel } = scoreResult;
+    // ── Step 2: Try OpenAI prediction ─────────────────────────
+    const profileData = {
+      ...profile.toJSON(),
+      dti:                    profile.calculateDTI(),
+      disposableIncome:       profile.calculateDisposableIncome(),
+      savingsRate:            profile.calculateSavingsRate(),
+      employmentStabilityScore: profile.getEmploymentStabilityScore(),
+      loanToIncomeRatio:      profile.calculateLoanToIncomeRatio(),
+    };
 
-    // Get approval probability
-    const approvalProbability = this.calculator.getApprovalProbability(score);
+    const aiResult = await predictLoanEligibility(profileData);
 
-    // Make decision
-    const approved = score >= 580; // Minimum threshold for approval
+    if (aiResult.success && aiResult.data) {
+      return this._buildFromAI(aiResult.data, profile);
+    }
 
-    // Get explanation
-    const explanation = this.generateExplanation(profile, score, approved);
+    // ── Step 3: Rule-based fallback ────────────────────────────
+    console.warn('OpenAI unavailable — using rule-based fallback');
+    return this._buildFromRules(profile);
+  }
 
-    // Get recommendations
-    const recommendations = approved 
-      ? this.getLoanRecommendations(profile, score)
-      : this.getImprovementRecommendations(profile);
+  // ── Build result from OpenAI response ─────────────────────
+  _buildFromAI(ai, profile) {
+    const approved = ai.approved === true;
+
+    // Normalise factorScores → breakdown format expected by RiskChart
+    const breakdown = {};
+    if (ai.factorScores) {
+      Object.entries(ai.factorScores).forEach(([key, f]) => {
+        breakdown[key] = {
+          label:  f.label,
+          value:  f.value,
+          impact: f.impact,
+          score:  f.score,
+          maxScore: f.maxScore,
+        };
+      });
+    }
+
+    const recs = approved
+      ? [{
+          type:         'Personal Loan (قرض شخصي)',
+          description:  'Unsecured personal loan — salary transfer to bank required',
+          maxAmount:    ai.maxLoanAmount || 0,
+          interestRate: `${ai.interestRateMin}% – ${ai.interestRateMax}% per annum`,
+          term:         `Up to ${ai.loanTermMonths || 84} months`,
+          icon:         'person',
+          suitability:  ai.creditScore >= 700 ? 'Highly Suitable' : 'Suitable',
+          notes:        'Employer must be on bank approved list. Salary transfer mandatory.',
+        }]
+      : (ai.recommendations || this._buildImprovementRecs(profile));
 
     return {
-      approved: approved,
-      confidence: approvalProbability,
-      score: score,
-      riskLevel: riskLevel,
-      reasons: explanation.reasons,
-      positiveFactors: explanation.positiveFactors,
-      negativeFactors: explanation.negativeFactors,
-      recommendations: recommendations,
-      interestRateRange: this.getInterestRateRange(score),
-      maxLoanAmount: this.getMaxLoanAmount(profile, score),
-      breakdown: scoreResult.breakdown
+      approved,
+      confidence:        ai.approvalProbability    || 0,
+      score:             ai.creditScore            || 300,
+      riskLevel:         ai.riskLevel              || 'Very High',
+      rating:            ai.rating                 || 'Poor',
+      hardReject:        false,
+      hardRejectReasons: [],
+      reasons:           ai.reasons               || [],
+      positiveFactors:   ai.positiveFactors        || [],
+      negativeFactors:   ai.negativeFactors        || [],
+      recommendations:   recs,
+      interestRateRange: [ai.interestRateMin || 0, ai.interestRateMax || 0],
+      maxLoanAmount:     ai.maxLoanAmount          || 0,
+      recommendedMonthlyInstallment: ai.recommendedMonthlyInstallment || 0,
+      breakdown,
+      financialHealthSummary: ai.financialHealthSummary || '',
+      source: 'openai',
     };
   }
 
-  /**
-   * Generate explainable AI output
-   * @param {UserFinancialProfile} profile - User's financial profile
-   * @param {number} score - Credit score
-   * @param {boolean} approved - Approval decision
-   * @returns {object} - Explanation with reasons
-   */
-  generateExplanation(profile, score, approved) {
-    const positiveFactors = [];
-    const negativeFactors = [];
-    const reasons = [];
+  // ── Rule-based fallback ────────────────────────────────────
+  _buildFromRules(profile) {
+    const scoreResult     = this.calculator.calculateScore(profile);
+    const score           = scoreResult.success ? scoreResult.score : 300;
+    const riskLevel       = scoreResult.riskLevel  || 'Very High';
+    const rating          = scoreResult.rating      || 'Poor';
+    const approved        = score >= this.APPROVAL_THRESHOLD;
+    const confidence      = this.calculator.getApprovalProbability(score);
+    const explanation     = this._generateExplanation(profile, score, approved);
+    const interestRange   = this._getInterestRange(score);
+    const maxLoan         = this._getMaxLoan(profile, score);
 
-    // Analyze DTI
-    const dti = profile.calculateDTI();
-    if (dti < 20) {
-      positiveFactors.push('Excellent debt-to-income ratio');
-      reasons.push('Your debt-to-income ratio is excellent (under 20%)');
-    } else if (dti < 36) {
-      positiveFactors.push('Good debt-to-income ratio');
-      reasons.push('Your debt-to-income ratio is within acceptable range');
-    } else if (dti < 50) {
-      negativeFactors.push('High debt-to-income ratio');
-      reasons.push('Your debt-to-income ratio is high (' + dti.toFixed(1) + '%)');
-    } else {
-      negativeFactors.push('Very high debt burden');
-      reasons.push('Your debt-to-income ratio is too high (' + dti.toFixed(1) + '%)');
-    }
-
-    // Analyze Income
-    if (profile.monthlyIncome > 5000) {
-      positiveFactors.push('Strong income level');
-      reasons.push('Your monthly income is strong');
-    } else if (profile.monthlyIncome > 3000) {
-      positiveFactors.push('Adequate income level');
-    } else {
-      negativeFactors.push('Low income level');
-      reasons.push('Your income level may limit loan approval');
-    }
-
-    // Analyze Employment
-    const employmentScore = profile.getEmploymentStabilityScore();
-    if (employmentScore > 70) {
-      positiveFactors.push('Stable employment history');
-      reasons.push('Your employment is stable and secure');
-    } else if (employmentScore > 50) {
-      positiveFactors.push('Acceptable employment status');
-    } else if (employmentScore > 0) {
-      negativeFactors.push('Limited employment stability');
-      reasons.push('Your employment stability could be stronger');
-    } else {
-      negativeFactors.push('No current employment');
-      reasons.push('Currently unemployed - major risk factor');
-    }
-
-    // Analyze Savings
-    const savingsRate = profile.calculateSavingsRate();
-    if (savingsRate > 20) {
-      positiveFactors.push('Excellent savings discipline');
-      reasons.push('You demonstrate excellent financial discipline');
-    } else if (savingsRate > 10) {
-      positiveFactors.push('Good savings habits');
-    } else if (savingsRate > 0) {
-      negativeFactors.push('Limited savings');
-    } else {
-      negativeFactors.push('No savings capacity');
-      reasons.push('No disposable income for savings - high risk');
-    }
-
-    // Analyze Age
-    if (profile.age >= 30 && profile.age <= 50) {
-      positiveFactors.push('Optimal age range for borrowing');
-    } else if (profile.age < 25) {
-      negativeFactors.push('Young borrower - limited credit history expected');
-    } else if (profile.age > 60) {
-      negativeFactors.push('Near retirement age - repayment concerns');
-    }
-
-    // Analyze Loan Amount
-    const loanToIncome = profile.calculateLoanToIncomeRatio();
-    if (loanToIncome > 4) {
-      negativeFactors.push('Loan amount too high relative to income');
-      reasons.push('Requested loan amount is very high compared to your income');
-    } else if (loanToIncome > 3) {
-      negativeFactors.push('High loan-to-income ratio');
-    } else if (loanToIncome < 2) {
-      positiveFactors.push('Reasonable loan amount requested');
-    }
-
-    // Final decision reason
-    if (approved) {
-      reasons.unshift('✅ Loan APPROVED - Credit score meets minimum requirements');
-    } else {
-      reasons.unshift('❌ Loan DENIED - Credit score below minimum threshold (580)');
-    }
+    const recs = approved
+      ? [{
+          type:         'Personal Loan (قرض شخصي)',
+          description:  'Unsecured personal loan — salary transfer required',
+          maxAmount:    maxLoan,
+          interestRate: `${interestRange[0]}% – ${interestRange[1]}% per annum`,
+          term:         'Up to 84 months',
+          icon:         'person',
+          suitability:  score >= 700 ? 'Highly Suitable' : 'Suitable',
+          notes:        'Employer must be on bank approved list. Salary transfer mandatory.',
+        }]
+      : this._buildImprovementRecs(profile);
 
     return {
-      reasons,
-      positiveFactors,
-      negativeFactors
+      approved,
+      confidence,
+      score,
+      riskLevel,
+      rating,
+      hardReject:        false,
+      hardRejectReasons: [],
+      reasons:           explanation.reasons,
+      positiveFactors:   explanation.positiveFactors,
+      negativeFactors:   explanation.negativeFactors,
+      recommendations:   recs,
+      interestRateRange: interestRange,
+      maxLoanAmount:     maxLoan,
+      breakdown:         scoreResult.breakdown || this._buildFallbackBreakdown(profile),
+      financialHealthSummary: profile.getFinancialHealthSummary(),
+      source: 'rule-based',
     };
   }
 
-  /**
-   * Get improvement recommendations for rejected loans
-   * @param {UserFinancialProfile} profile - User's financial profile
-   * @returns {array} - List of recommendations
-   */
-  getImprovementRecommendations(profile) {
-    const recommendations = [];
+  // ── Breakdown when CreditScoreCalculator isn't called ─────
+  _buildFallbackBreakdown(profile) {
+    const dti    = profile.calculateDTI();
+    const sr     = profile.calculateSavingsRate();
+    const empSc  = profile.getEmploymentStabilityScore();
+    return {
+      dti:        { label: 'Debt-to-Income Ratio',   value: `${dti.toFixed(1)}%`,    impact: dti < 20 ? 'Positive' : dti < 40 ? 'Neutral' : 'Negative' },
+      income:     { label: 'Monthly Income',          value: `EGP ${profile.monthlyIncome.toLocaleString()}`, impact: profile.monthlyIncome >= 20000 ? 'Positive' : profile.monthlyIncome >= 10000 ? 'Neutral' : 'Negative' },
+      employment: { label: 'Employment Stability',    value: `${empSc}/100`,          impact: empSc >= 70 ? 'Positive' : empSc >= 50 ? 'Neutral' : 'Negative' },
+      savings:    { label: 'Savings Rate',            value: `${sr.toFixed(1)}%`,     impact: sr >= 15 ? 'Positive' : sr >= 5 ? 'Neutral' : 'Negative' },
+      age:        { label: 'Age Factor',              value: `${profile.age} years`,  impact: profile.age >= 30 && profile.age <= 50 ? 'Positive' : 'Neutral' },
+    };
+  }
 
+  // ── Explanation generator (rule-based) ────────────────────
+  _generateExplanation(profile, score, approved) {
+    const pos = [], neg = [], reasons = [];
     const dti = profile.calculateDTI();
-    if (dti > 36) {
-      recommendations.push({
-        title: 'Reduce Your Debt-to-Income Ratio',
-        description: 'Your DTI is ' + dti.toFixed(1) + '%. Try to reduce expenses or pay down existing debts to get below 36%.',
-        priority: 'high',
-        icon: 'trending-down'
-      });
-    }
+    const sr  = profile.calculateSavingsRate();
+    const emp = profile.getEmploymentStabilityScore();
+    const lti = profile.calculateLoanToIncomeRatio();
 
-    if (profile.monthlyIncome < 3000) {
-      recommendations.push({
-        title: 'Increase Your Income',
-        description: 'Consider additional income sources or negotiate a raise to improve your financial position.',
-        priority: 'high',
-        icon: 'trending-up'
-      });
-    }
+    // DTI
+    if      (dti < 20) { pos.push('Excellent DTI'); reasons.push(`DTI of ${dti.toFixed(1)}% is excellent`); }
+    else if (dti < 40) { pos.push('Acceptable DTI'); reasons.push(`DTI of ${dti.toFixed(1)}% is within Egyptian bank range`); }
+    else if (dti < 50) { neg.push('High DTI');       reasons.push(`DTI of ${dti.toFixed(1)}% is high — banks prefer under 40%`); }
+    else               { neg.push('DTI exceeds limit'); reasons.push(`DTI of ${dti.toFixed(1)}% exceeds the 50% Egyptian limit`); }
 
-    const employmentScore = profile.getEmploymentStabilityScore();
-    if (employmentScore < 50) {
-      recommendations.push({
-        title: 'Improve Employment Stability',
-        description: 'Seek permanent employment or build a longer employment history.',
-        priority: 'medium',
-        icon: 'briefcase'
-      });
-    }
+    // Income
+    if      (profile.monthlyIncome >= 30000) { pos.push('Strong income');              reasons.push(`Monthly income EGP ${profile.monthlyIncome.toLocaleString()} is strong`); }
+    else if (profile.monthlyIncome >= 15000) { pos.push('Adequate income');             }
+    else if (profile.monthlyIncome >= 10000) { pos.push('Income meets minimum');        reasons.push('Income meets the EGP 10,000 Egyptian minimum'); }
+    else                                     { neg.push('Income below minimum');        reasons.push(`Income EGP ${profile.monthlyIncome.toLocaleString()} is below EGP 10,000 minimum`); }
 
-    const savingsRate = profile.calculateSavingsRate();
-    if (savingsRate < 10) {
-      recommendations.push({
-        title: 'Build Your Savings',
-        description: 'Try to save at least 10% of your monthly income to demonstrate financial discipline.',
-        priority: 'medium',
-        icon: 'wallet'
-      });
-    }
+    // Employment
+    if      (emp >= 85) { pos.push('Stable permanent employment'); reasons.push('Permanent employment — strongly preferred by Egyptian banks'); }
+    else if (emp >= 60) { pos.push('Acceptable employment');        }
+    else if (emp > 0)   { neg.push('Limited employment stability'); reasons.push('Employment stability needs improvement'); }
+    else                { neg.push('No employment');                reasons.push('Unemployed — Egyptian banks require active employment'); }
 
-    if (profile.existingDebts > 0) {
-      recommendations.push({
-        title: 'Pay Down Existing Debts',
-        description: 'Focus on reducing your existing debt burden before applying for new loans.',
-        priority: 'high',
-        icon: 'card'
-      });
-    }
+    // Savings
+    if      (sr > 20) pos.push('Excellent savings discipline');
+    else if (sr > 10) pos.push('Good savings habits');
+    else if (sr > 0)  neg.push('Limited savings capacity');
+    else              { neg.push('No savings capacity'); reasons.push('No disposable income — high risk'); }
 
-    const loanToIncome = profile.calculateLoanToIncomeRatio();
-    if (loanToIncome > 3) {
-      recommendations.push({
-        title: 'Request a Lower Loan Amount',
-        description: 'Consider requesting a smaller loan amount relative to your annual income.',
-        priority: 'medium',
-        icon: 'cash'
-      });
-    }
+    // Age
+    if      (profile.age >= 30 && profile.age <= 50) pos.push('Optimal age (30–50)');
+    else if (profile.age >= 21 && profile.age <= 65) pos.push('Age within eligible range');
 
-    return recommendations;
+    // LTI
+    if      (lti > 5) { neg.push('Very high loan amount'); reasons.push('Requested loan is very large relative to annual income'); }
+    else if (lti > 3) { neg.push('High loan-to-income ratio'); }
+    else if (lti <= 2){ pos.push('Reasonable loan amount'); }
+
+    if (approved) reasons.unshift(`✅ Personal Loan APPROVED — Score ${score} meets requirements`);
+    else          reasons.unshift(`❌ Personal Loan DENIED — Score ${score} below threshold (${this.APPROVAL_THRESHOLD})`);
+
+    return { positiveFactors: pos, negativeFactors: neg, reasons };
   }
 
-  /**
-   * Get loan recommendations for approved loans
-   * @param {UserFinancialProfile} profile - User's financial profile
-   * @param {number} score - Credit score
-   * @returns {array} - List of loan options
-   */
-  getLoanRecommendations(profile, score) {
-    const recommendations = [];
-    const maxAmount = this.getMaxLoanAmount(profile, score);
-    const interestRange = this.getInterestRateRange(score);
+  // ── Improvement recommendations (EGP context) ─────────────
+  _buildImprovementRecs(profile) {
+    const recs = [];
+    const dti  = profile.calculateDTI();
+    const sr   = profile.calculateSavingsRate();
+    const lti  = profile.calculateLoanToIncomeRatio();
 
-    // Personal Loan
-    recommendations.push({
-      type: 'Personal Loan',
-      description: 'Unsecured loan for any purpose',
-      maxAmount: maxAmount,
-      interestRate: interestRange,
-      term: '1-5 years',
-      icon: 'person',
-      suitability: score >= 700 ? 'Highly Suitable' : 'Suitable'
-    });
+    if (dti > 40)
+      recs.push({ title: 'Reduce Debt-to-Income Ratio', description: `Your DTI is ${dti.toFixed(1)}%. Egyptian banks prefer under 40%. Reduce monthly expenses or pay off existing debts.`, priority: 'high', icon: 'trending-down' });
 
-    // Home Loan (if income is sufficient)
-    if (profile.monthlyIncome > 5000) {
-      recommendations.push({
-        type: 'Home Loan',
-        description: 'Mortgage for home purchase',
-        maxAmount: maxAmount * 5, // Higher for mortgages
-        interestRate: (interestRange[0] - 1) + '% - ' + (interestRange[1] - 1) + '%',
-        term: '15-30 years',
-        icon: 'home',
-        suitability: score >= 680 ? 'Highly Suitable' : 'Suitable'
-      });
-    }
+    if (profile.monthlyIncome < this.MIN_INCOME_EGP)
+      recs.push({ title: 'Increase Monthly Income', description: `Egyptian banks require at least EGP ${this.MIN_INCOME_EGP.toLocaleString()}/month. Yours is EGP ${profile.monthlyIncome.toLocaleString()}.`, priority: 'high', icon: 'trending-up' });
 
-    // Auto Loan
-    recommendations.push({
-      type: 'Auto Loan',
-      description: 'Loan for vehicle purchase',
-      maxAmount: Math.min(maxAmount * 2, profile.monthlyIncome * 48),
-      interestRate: (interestRange[0] - 0.5) + '% - ' + (interestRange[1] - 0.5) + '%',
-      term: '3-7 years',
-      icon: 'car',
-      suitability: score >= 650 ? 'Suitable' : 'Fair'
-    });
+    if (profile.employmentType === 'unemployed')
+      recs.push({ title: 'Obtain Active Employment', description: 'Egyptian banks require a salary and active employment. Seek a permanent or contract position.', priority: 'high', icon: 'briefcase' });
 
-    // Business Loan (if self-employed)
-    if (profile.employmentType.toLowerCase() === 'self-employed') {
-      recommendations.push({
-        type: 'Business Loan',
-        description: 'Loan for business purposes',
-        maxAmount: maxAmount * 1.5,
-        interestRate: (interestRange[0] + 1) + '% - ' + (interestRange[1] + 2) + '%',
-        term: '1-10 years',
-        icon: 'briefcase',
-        suitability: score >= 670 ? 'Suitable' : 'Consider'
-      });
-    }
+    if (profile.employmentYears < 0.5)
+      recs.push({ title: 'Complete Probation Period', description: 'You must complete at least 6 months at your current employer before applying.', priority: 'high', icon: 'time' });
 
-    return recommendations;
+    if (profile.existingDebts > 0)
+      recs.push({ title: 'Pay Down Existing Debts', description: `Reduce your EGP ${profile.existingDebts.toLocaleString()} debt to improve your DTI ratio significantly.`, priority: 'high', icon: 'card' });
+
+    if (sr < 10)
+      recs.push({ title: 'Build Savings', description: 'Aim to save at least 10% of monthly income to demonstrate financial discipline.', priority: 'medium', icon: 'wallet' });
+
+    if (lti > 3)
+      recs.push({ title: 'Request a Lower Loan Amount', description: 'Egyptian banks approve personal loans up to ~3–4× annual income. Consider a lower amount.', priority: 'medium', icon: 'cash' });
+
+    return recs;
   }
 
-  /**
-   * Get interest rate range based on credit score
-   * @param {number} score - Credit score
-   * @returns {array} - [minRate, maxRate]
-   */
-  getInterestRateRange(score) {
-    if (score >= 750) return [4.5, 6.5];
-    if (score >= 700) return [6.5, 8.5];
-    if (score >= 650) return [8.5, 11.5];
-    if (score >= 600) return [11.5, 14.5];
-    return [14.5, 18.5];
+  // ── Fallback eligibility check ─────────────────────────────
+  _fallbackEligibility(profile) {
+    const issues = [];
+    if (profile.age < 21)                     issues.push('Must be at least 21 years old');
+    if (profile.age > 65)                     issues.push('Must be under 65 years old');
+    if (profile.monthlyIncome < this.MIN_INCOME_EGP)
+      issues.push(`Monthly income must be at least EGP ${this.MIN_INCOME_EGP.toLocaleString()}`);
+    if (profile.employmentType === 'unemployed') issues.push('Must be employed');
+    if (profile.employmentYears < 0.5)        issues.push('Must complete probation (6+ months)');
+    if (profile.calculateDTI() > this.MAX_DTI) issues.push(`DTI exceeds ${this.MAX_DTI}%`);
+    return issues;
   }
 
-  /**
-   * Calculate maximum loan amount
-   * @param {UserFinancialProfile} profile - User's financial profile
-   * @param {number} score - Credit score
-   * @returns {number} - Maximum loan amount
-   */
-  getMaxLoanAmount(profile, score) {
-    const annualIncome = profile.monthlyIncome * 12;
-    const disposableIncome = profile.calculateDisposableIncome();
-    
-    // Base multiplier on credit score
-    let multiplier = 1;
-    if (score >= 750) multiplier = 4;
+  // ── Egyptian interest rates (CBE-based, 2024–2025) ─────────
+  _getInterestRange(score) {
+    if (score >= 750) return [25, 27];
+    if (score >= 700) return [27, 29];
+    if (score >= 650) return [29, 31];
+    if (score >= 600) return [31, 33];
+    return [33, 35];
+  }
+
+  // ── Max loan (40% installment rule, max 84 months) ─────────
+  _getMaxLoan(profile, score) {
+    const annualIncome   = profile.monthlyIncome * 12;
+    let multiplier = 2;
+    if      (score >= 750) multiplier = 4.0;
     else if (score >= 700) multiplier = 3.5;
-    else if (score >= 650) multiplier = 3;
+    else if (score >= 650) multiplier = 3.0;
     else if (score >= 600) multiplier = 2.5;
-    else multiplier = 2;
 
-    // Calculate based on annual income and disposable income
-    const maxByIncome = annualIncome * multiplier;
-    const maxByDisposable = disposableIncome * 36; // 3 years of disposable income
+    const maxByIncome      = annualIncome * multiplier;
+    const maxInstallment   = profile.monthlyIncome * 0.40; // Egyptian 40% rule
+    const maxByInstallment = maxInstallment * 84;          // 84 months max
 
-    // Return the more conservative amount
-    return Math.floor(Math.min(maxByIncome, maxByDisposable));
+    return Math.floor(Math.min(maxByIncome, maxByInstallment));
   }
 }
 
