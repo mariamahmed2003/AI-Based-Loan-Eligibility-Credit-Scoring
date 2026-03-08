@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useEffect, useState } from 'react';
 import { auth } from '../config/firebaseConfig'; // Double check this path
+import { ThemeProvider } from '../Context/themecontext';
 import COLORS from '../utils/colors';
 
 SplashScreen.preventAutoHideAsync();
@@ -40,7 +41,7 @@ export default function RootLayout() {
   }, [user, segments]);
 
   return (
-    <>
+    <ThemeProvider>
       <StatusBar style="light" backgroundColor={COLORS.primary} />
       <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         <Stack.Screen name="index" />
@@ -49,6 +50,6 @@ export default function RootLayout() {
         <Stack.Screen name="Auth/signinscreen" />
         <Stack.Screen name="main" />
       </Stack>
-    </>
+    </ThemeProvider>
   );
 }

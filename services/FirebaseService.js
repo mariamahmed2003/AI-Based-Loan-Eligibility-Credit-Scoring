@@ -9,6 +9,7 @@ import {
   updateProfile
 } from 'firebase/auth';
 import {
+  deleteDoc,
   doc,
   getDoc,
   serverTimestamp,
@@ -134,6 +135,41 @@ class FirebaseService {
       }
     } catch (error) {
       console.error('❌ Get user data error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update user data in Firestore — used by settings.js for:
+   *  - App settings (notifications, emailUpdates, biometricAuth)
+   *  - Privacy settings
+   *  - Profile edits (displayName, name, phone)
+   *  - Clearing financial data
+   */
+  async updateUserData(userId, updates) {
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Update user data error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Delete all Firestore data for a user — called before Firebase Auth deleteUser
+   * in the Delete Account flow inside settings.js
+   */
+  async deleteUserData(userId) {
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      console.log('✅ User Firestore document deleted:', userId);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Delete user data error:', error);
       return { success: false, error: error.message };
     }
   }
