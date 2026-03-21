@@ -50,6 +50,21 @@ const decryptAES = (ciphertext) => {
   return _xorDecrypt(ciphertext, SECRET_KEY);
 };
 
+// Same color function as home.js — ensures avatar color is always in sync
+const getAvatarColor = (name) => {
+  const colors = [
+    '#FF5733', '#33FF57', '#3357FF', '#F333FF',
+    '#33FFF3', '#F3FF33', '#FF3385', '#8E44AD',
+    '#2980B9', '#27AE60', '#E67E22', '#F1C40F'
+  ];
+  if (!name) return '#8E44AD';
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash % colors.length)];
+};
+
 const ProfileScreen = () => {
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -152,7 +167,7 @@ const ProfileScreen = () => {
         <UserAvatar
           name={userData?.displayName || 'User'}
           size={100}
-          backgroundColor='#2ECC71'
+          backgroundColor={getAvatarColor(userData?.firstName)}
         />
         <Text style={styles.displayName}>
           {userData?.displayName || 'User Name'}
