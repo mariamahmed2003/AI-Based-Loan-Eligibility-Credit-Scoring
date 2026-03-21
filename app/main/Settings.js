@@ -1080,56 +1080,57 @@ const SettingButton = ({ icon, title, onPress, dangerous, last }) => (
 // STYLES
 // ═══════════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: COLORS.background },
-  contentContainer: { padding: 20, paddingBottom: 50 },
-  header:           { marginBottom: 24, marginTop: 20 },
-  title:            { fontSize: 28, fontWeight: 'bold', color: COLORS.text, marginBottom: 4 },
-  subtitle:         { fontSize: 14, color: COLORS.textLight },
+  container:        { flex: 1, backgroundColor: '#F2F3F7' },
+  contentContainer: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 110 },
+  header:           { marginBottom: 20, marginTop: 10 },
+  title:            { fontSize: 24, fontWeight: '800', color: '#0A2540', marginBottom: 2 },
+  subtitle:         { fontSize: 13, color: '#9CA3AF' },
 
   section: {
-    backgroundColor: COLORS.white,
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
+    marginBottom: 10,
+    overflow: 'hidden',
+    // No border, no elevation, no shadow = no gray frame
   },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 8 },
+  sectionTitle: {
+    fontSize: 11, fontWeight: '700',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
 
   settingItem: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 13,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    paddingVertical: 11, paddingHorizontal: 16,
+    borderTopWidth: 1, borderTopColor: '#F3F4F6',
   },
   settingLeft:          { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  settingIconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  settingIconContainer: { width: 34, height: 34, borderRadius: 9, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   settingContent:       { flex: 1 },
-  settingTitle:         { fontSize: 15, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
-  settingDescription:   { fontSize: 12, color: COLORS.textLight },
+  settingTitle:         { fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 1 },
+  settingDescription:   { fontSize: 12, color: '#9CA3AF' },
 
   settingButton: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 13,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    paddingVertical: 14, paddingHorizontal: 16,
+    borderTopWidth: 1, borderTopColor: '#F3F4F6',
   },
-  settingButtonTitle: { fontSize: 15, fontWeight: '500', color: COLORS.text },
+  settingButtonTitle: { fontSize: 14, fontWeight: '500', color: '#111827' },
 
   logoutButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: COLORS.white,
-    padding: 16, borderRadius: 16, marginTop: 8, marginBottom: 12,
-    borderWidth: 2, borderColor: COLORS.error,
-    elevation: 1,
+    backgroundColor: '#FFF1F2',
+    paddingVertical: 15, borderRadius: 16, marginTop: 10, marginBottom: 6,
   },
-  logoutText:   { fontSize: 16, fontWeight: '700', color: COLORS.error, marginLeft: 12 },
-  deleteButton: { alignItems: 'center', padding: 12 },
-  deleteText:   { fontSize: 14, color: COLORS.textLight, textDecorationLine: 'underline' },
-  versionText:  { textAlign: 'center', fontSize: 12, color: COLORS.textLight, marginTop: 12 },
+  logoutText:   { fontSize: 15, fontWeight: '700', color: '#E11D48', marginLeft: 8 },
+  deleteButton: { alignItems: 'center', paddingVertical: 10 },
+  deleteText:   { fontSize: 13, color: '#C4C9D4', textDecorationLine: 'underline' },
+  versionText:  { textAlign: 'center', fontSize: 11, color: '#D1D5DB', marginTop: 8, marginBottom: 4 },
 
-  // FIX: Badge shown instead of Switch for mobile-only features on web
   webOnlyBadge: {
     backgroundColor: '#F3F4F6', borderRadius: 8,
     paddingHorizontal: 8, paddingVertical: 4,
