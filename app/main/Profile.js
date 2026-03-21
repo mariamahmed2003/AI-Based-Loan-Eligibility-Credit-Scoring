@@ -152,6 +152,7 @@ const ProfileScreen = () => {
         <UserAvatar
           name={userData?.displayName || 'User'}
           size={100}
+          backgroundColor='#2ECC71'
         />
         <Text style={styles.displayName}>
           {userData?.displayName || 'User Name'}
