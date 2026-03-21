@@ -5,6 +5,9 @@
 // Shows personal and financial profile data
 // FIX: Uses onAuthStateChanged listener instead of getCurrentUser()
 //      to handle Firebase auth not being ready on page refresh
+// FIX: Decrypts financial profile values before displaying them —
+//      income, expenses, debts, employmentYears, requestedLoanAmount
+//      are stored encrypted in Firebase via financial.js XOR cipher.
 // ═══════════════════════════════════════════════════════════════
 
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +26,30 @@ import COLORS from '../../utils/colors';
 // Import Firebase auth directly to use onAuthStateChanged
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
+// FIX: Import decryptAES from financial.js so the same cipher is used
+// to decrypt the values that were encrypted when saving the profile.
+// FIX: Inline decryption — same XOR cipher + base64 as financial.js.
+// Avoids any import path issues between app/main and app/(main) folders.
+const SECRET_KEY = 'your-secure-secret-key-here';
+const _xorDecrypt = (encoded, key) => {
+  if (!encoded) return '';
+  try {
+    let decoded;
+    try { decoded = decodeURIComponent(escape(atob(encoded))); }
+    catch { decoded = atob(encoded); }
+    let result = '';
+    for (let i = 0; i < decoded.length; i++) {
+      result += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return result;
+  } catch { return encoded; }
+};
+const decryptAES = (ciphertext) => {
+  if (!ciphertext) return '';
+  if (/^\d+(\.\d+)?$/.test(String(ciphertext).trim())) return String(ciphertext).trim();
+  return _xorDecrypt(ciphertext, SECRET_KEY);
+};
+
 const ProfileScreen = () => {
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -30,9 +57,6 @@ const ProfileScreen = () => {
   const [currentUser, setCurrentUser] = useState(null);
 
   // ─── FIX: Listen to auth state changes ────────────────────────
-  // On page refresh, Firebase Auth takes time to restore session.
-  // getCurrentUser() returns null during that window.
-  // onAuthStateChanged fires AFTER auth is ready, so it's reliable.
   useEffect(() => {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -40,20 +64,14 @@ const ProfileScreen = () => {
         setCurrentUser(user);
         loadUserData(user.uid);
       } else {
-        // User is genuinely not logged in
         setCurrentUser(null);
         setUserData(null);
         setLoading(false);
       }
     });
-
-    // Cleanup listener on unmount
     return () => unsubscribe();
   }, []);
 
-  /**
-   * Load user data from Firebase using the provided uid
-   */
   const loadUserData = async (uid) => {
     try {
       const result = await FirebaseService.getUserData(uid);
@@ -68,18 +86,12 @@ const ProfileScreen = () => {
     }
   };
 
-  /**
-   * Handle pull-to-refresh
-   */
   const onRefresh = () => {
     if (!currentUser) return;
     setRefreshing(true);
     loadUserData(currentUser.uid);
   };
 
-  /**
-   * Format date for display
-   */
   const formatDate = (dateString) => {
     if (!dateString) return 'Not set';
     const date = new Date(dateString);
@@ -90,9 +102,6 @@ const ProfileScreen = () => {
     });
   };
 
-  /**
-   * Calculate age from date of birth
-   */
   const calculateAge = (dateOfBirth) => {
     if (!dateOfBirth) return 'N/A';
     const today = new Date();
@@ -113,7 +122,6 @@ const ProfileScreen = () => {
     );
   }
 
-  // Edge case: auth resolved but no user
   if (!currentUser) {
     return (
       <View style={styles.loadingContainer}>
@@ -121,6 +129,15 @@ const ProfileScreen = () => {
       </View>
     );
   }
+
+  // FIX: Decrypt all encrypted financial fields once here so the rest
+  // of the render uses clean plain numbers — nothing else changes.
+  const fp = userData?.financialProfile;
+  const decryptedIncome      = fp ? decryptAES(fp.income)              : '0';
+  const decryptedExpenses    = fp ? decryptAES(fp.expenses)            : '0';
+  const decryptedDebts       = fp ? decryptAES(fp.debts)               : '0';
+  const decryptedEmpYears    = fp ? decryptAES(fp.employmentYears)     : '';
+  const decryptedLoanAmount  = fp ? decryptAES(fp.requestedLoanAmount) : '0';
 
   return (
     <ScrollView
@@ -210,51 +227,49 @@ const ProfileScreen = () => {
       </View>
 
       {/* Financial Profile Section */}
-      {userData?.financialProfile?.hasData && (
+      {fp?.hasData && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Financial Profile</Text>
 
           <InfoItem
             icon="cash-outline"
             label="Monthly Income"
-            value={'$' + (userData.financialProfile.income || 0).toLocaleString()}
+            value={'EGP ' + (parseFloat(decryptedIncome) || 0).toLocaleString()}
             valueColor={COLORS.success}
           />
 
           <InfoItem
             icon="trending-down-outline"
             label="Monthly Expenses"
-            value={'$' + (userData.financialProfile.expenses || 0).toLocaleString()}
+            value={'EGP ' + (parseFloat(decryptedExpenses) || 0).toLocaleString()}
             valueColor={COLORS.error}
           />
 
           <InfoItem
             icon="card-outline"
             label="Existing Debts"
-            value={'$' + (userData.financialProfile.debts || 0).toLocaleString()}
+            value={'EGP ' + (parseFloat(decryptedDebts) || 0).toLocaleString()}
           />
 
           <InfoItem
             icon="briefcase-outline"
             label="Employment Type"
-            value={userData.financialProfile.employment
-              ? userData.financialProfile.employment.charAt(0).toUpperCase() +
-                userData.financialProfile.employment.slice(1).replace('-', ' ')
+            value={fp.employment
+              ? fp.employment.charAt(0).toUpperCase() +
+                fp.employment.slice(1).replace('-', ' ')
               : 'Not set'}
           />
 
           <InfoItem
             icon="time-outline"
             label="Years of Employment"
-            value={userData.financialProfile.employmentYears
-              ? userData.financialProfile.employmentYears + ' years'
-              : 'Not set'}
+            value={decryptedEmpYears ? decryptedEmpYears + ' years' : 'Not set'}
           />
 
           <InfoItem
             icon="wallet-outline"
             label="Requested Loan Amount"
-            value={'$' + (userData.financialProfile.requestedLoanAmount || 0).toLocaleString()}
+            value={'EGP ' + (parseFloat(decryptedLoanAmount) || 0).toLocaleString()}
             valueColor={COLORS.primary}
           />
         </View>
@@ -267,16 +282,16 @@ const ProfileScreen = () => {
         <View style={styles.statsGrid}>
           <StatBox
             icon="document-text-outline"
-            value={userData?.financialProfile?.hasData ? '1' : '0'}
+            value={fp?.hasData ? '1' : '0'}
             label="Profile Completed"
             color={COLORS.primary}
           />
 
           <StatBox
             icon="stats-chart-outline"
-            value={userData?.financialProfile?.hasData ? '✓' : '✗'}
+            value={fp?.hasData ? '✓' : '✗'}
             label="Credit Score"
-            color={userData?.financialProfile?.hasData ? COLORS.success : COLORS.textLight}
+            color={fp?.hasData ? COLORS.success : COLORS.textLight}
           />
         </View>
       </View>

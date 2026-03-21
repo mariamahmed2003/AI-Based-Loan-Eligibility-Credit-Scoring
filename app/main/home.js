@@ -15,6 +15,27 @@ import {
 import UserAvatar from '../../components/UserAvatar';
 import FirebaseService from '../../services/FirebaseService';
 
+// FIX: Inline XOR decryption — same cipher + key as financial.js
+// so encrypted Firebase values display as plain numbers in the UI.
+const _SK = 'your-secure-secret-key-here';
+const _xorDecrypt = (encoded, key) => {
+  if (!encoded) return '';
+  try {
+    let decoded;
+    try { decoded = decodeURIComponent(escape(atob(encoded))); }
+    catch { decoded = atob(encoded); }
+    let result = '';
+    for (let i = 0; i < decoded.length; i++)
+      result += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    return result;
+  } catch { return encoded; }
+};
+const decryptVal = (v) => {
+  if (!v) return '0';
+  if (/^\d+(\.\d+)?$/.test(String(v).trim())) return String(v).trim();
+  return _xorDecrypt(v, _SK);
+};
+
 const { width } = Dimensions.get('window');
 
 const HomeScreen = () => {
@@ -23,7 +44,6 @@ const HomeScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Using your specific color values
   const THEME = {
     primary: '#0A2540',
     accent: '#2ECC71',
@@ -44,14 +64,11 @@ const HomeScreen = () => {
       if (user) {
         const result = await FirebaseService.getUserData(user.uid);
         if (result.success && result.data?.firstName) {
-          // Data loaded successfully with a real name
           setUserData(result.data);
         } else if (retryCount < 5) {
-          // Firestore write may not be complete yet — wait 1 second and retry
           setTimeout(() => loadUserData(retryCount + 1), 1000);
-          return; // Don't call setLoading(false) yet, keep showing loader
+          return;
         } else {
-          // After 5 retries, show whatever data we have (even if incomplete)
           if (result.success) {
             setUserData(result.data);
           }
@@ -60,7 +77,6 @@ const HomeScreen = () => {
     } catch (error) {
       console.error('Error loading user data:', error);
     } finally {
-      // Only stop loading if we're not going to retry
       if (retryCount === 0 || retryCount >= 5) {
         setLoading(false);
         setRefreshing(false);
@@ -68,24 +84,18 @@ const HomeScreen = () => {
     }
   };
 
-  /**
-   * Generates a consistent background color based on the user's name
-   * to ensure different registrations have different colored circles.
-   */
   const getAvatarColor = (name) => {
     const colors = [
       '#FF5733', '#33FF57', '#3357FF', '#F333FF',
       '#33FFF3', '#F3FF33', '#FF3385', '#8E44AD',
       '#2980B9', '#27AE60', '#E67E22', '#F1C40F'
     ];
-    if (!name) return '#8E44AD'; // Default purple if no name
-
+    if (!name) return '#8E44AD';
     let hash = 0;
     for (let i = 0; i < name.length; i++) {
       hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
-    const index = Math.abs(hash % colors.length);
-    return colors[index];
+    return colors[Math.abs(hash % colors.length)];
   };
 
   const onRefresh = () => {
@@ -111,6 +121,10 @@ const HomeScreen = () => {
 
   const hasFinancialData = userData?.financialProfile?.hasData || false;
 
+  // FIX: Decrypt income and expenses before passing to StatCard
+  const income   = parseFloat(decryptVal(userData?.financialProfile?.income))   || 0;
+  const expenses = parseFloat(decryptVal(userData?.financialProfile?.expenses)) || 0;
+
   return (
     <ScrollView
       style={styles.container}
@@ -133,12 +147,12 @@ const HomeScreen = () => {
           <UserAvatar
             name={userData?.firstName || 'User'}
             size={50}
-            backgroundColor={getAvatarColor(userData?.firstName)} // Dynamically passed color
+            backgroundColor={getAvatarColor(userData?.firstName)}
           />
         </TouchableOpacity>
       </View>
 
-      {/* Main Action Card (Centerpiece) */}
+      {/* Main Action Card */}
       <TouchableOpacity
         style={[styles.actionCard, { backgroundColor: THEME.primary }]}
         onPress={() => router.push(hasFinancialData ? '/main/CreditScore' : '/main/FinancialInput')}
@@ -161,19 +175,19 @@ const HomeScreen = () => {
         </View>
       </TouchableOpacity>
 
-      {/* Quick Stats Grid */}
+      {/* Quick Stats Grid — now shows decrypted plain numbers */}
       {hasFinancialData && (
         <View style={styles.statsGrid}>
           <StatCard
             icon="cash-outline"
             title="Income"
-            value={'$' + (userData?.financialProfile?.income || 0).toLocaleString()}
+            value={'EGP ' + income.toLocaleString()}
             color={THEME.accent}
           />
           <StatCard
             icon="trending-down-outline"
             title="Expenses"
-            value={'$' + (userData?.financialProfile?.expenses || 0).toLocaleString()}
+            value={'EGP ' + expenses.toLocaleString()}
             color="#E74C3C"
           />
         </View>
@@ -202,7 +216,6 @@ const HomeScreen = () => {
   );
 };
 
-// Simplified Sub-components
 const StatCard = ({ icon, title, value, color }) => (
   <View style={styles.statCard}>
     <View style={[styles.statIconCircle, { backgroundColor: color + '15' }]}>
@@ -224,110 +237,34 @@ const FeatureItem = ({ icon, title, onPress, accentColor }) => (
 );
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F7FA'
-  },
-  contentContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 40,
-    alignItems: 'center'
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F5F7FA'
-  },
-  loadingText: { marginTop: 12, fontWeight: '500' },
+  container:        { flex: 1, backgroundColor: '#F5F7FA' },
+  contentContainer: { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 40, alignItems: 'center' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F7FA' },
+  loadingText:      { marginTop: 12, fontWeight: '500' },
 
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
-    marginBottom: 30
-  },
-  greeting: { fontSize: 16, color: '#6B7280' },
-  userName: { fontSize: 28, fontWeight: '800', color: '#2C2C2C', marginTop: 2 },
-  avatarContainer: {
-    borderWidth: 2,
-    borderColor: '#FFF',
-    borderRadius: 25,
-    elevation: 3
-  },
+  header:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 30 },
+  greeting:         { fontSize: 16, color: '#6B7280' },
+  userName:         { fontSize: 28, fontWeight: '800', color: '#2C2C2C', marginTop: 2 },
+  avatarContainer:  { borderWidth: 2, borderColor: '#FFF', borderRadius: 25, elevation: 3 },
 
-  actionCard: {
-    width: '100%',
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 25,
-    elevation: 8,
-    shadowColor: '#0A2540',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10
-  },
-  actionCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center'
-  },
-  iconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16
-  },
-  textColumn: { flex: 1 },
-  actionTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  actionSubtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 4 },
+  actionCard:        { width: '100%', borderRadius: 20, padding: 24, marginBottom: 25, elevation: 8, shadowColor: '#0A2540', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
+  actionCardContent: { flexDirection: 'row', alignItems: 'center' },
+  iconCircle:        { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  textColumn:        { flex: 1 },
+  actionTitle:       { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  actionSubtitle:    { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 4 },
 
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    gap: 15,
-    marginBottom: 30
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    padding: 20,
-    borderRadius: 16,
-    alignItems: 'center',
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#E5E7EB'
-  },
-  statIconCircle: {
-    padding: 10,
-    borderRadius: 12,
-    marginBottom: 12
-  },
-  statLabel: { fontSize: 12, color: '#6B7280', fontWeight: '600', textTransform: 'uppercase' },
-  statValue: { fontSize: 18, fontWeight: 'bold', marginTop: 4 },
+  statsGrid:      { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 15, marginBottom: 30 },
+  statCard:       { flex: 1, backgroundColor: '#FFFFFF', padding: 20, borderRadius: 16, alignItems: 'center', elevation: 2, borderWidth: 1, borderColor: '#E5E7EB' },
+  statIconCircle: { padding: 10, borderRadius: 12, marginBottom: 12 },
+  statLabel:      { fontSize: 12, color: '#6B7280', fontWeight: '600', textTransform: 'uppercase' },
+  statValue:      { fontSize: 18, fontWeight: 'bold', marginTop: 4 },
 
   sectionHeader: { width: '100%', marginBottom: 15 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#2C2C2C' },
-  linkRow: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 12,
-    elevation: 1
-  },
-  linkIconBox: {
-    padding: 10,
-    borderRadius: 10,
-    marginRight: 15
-  },
-  linkText: { flex: 1, fontWeight: '600', color: '#2C2C2C', fontSize: 15 }
+  sectionTitle:  { fontSize: 18, fontWeight: '700', color: '#2C2C2C' },
+  linkRow:       { width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 16, borderRadius: 16, marginBottom: 12, elevation: 1 },
+  linkIconBox:   { padding: 10, borderRadius: 10, marginRight: 15 },
+  linkText:      { flex: 1, fontWeight: '600', color: '#2C2C2C', fontSize: 15 },
 });
 
 export default HomeScreen;

@@ -62,7 +62,7 @@ const xorDecrypt = (encoded, key) => {
 
 // Same public API as before — credit.js uses these same names
 const encryptAES = (text) => xorEncrypt(text, SECRET_KEY);
-const decryptAES = (ciphertext) => {
+export const decryptAES = (ciphertext) => {
   if (!ciphertext) return '';
   // Graceful fallback: if the stored value is already a plain number
   // (data saved before encryption was added), return it directly
