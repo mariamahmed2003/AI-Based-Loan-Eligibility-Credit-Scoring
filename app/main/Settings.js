@@ -83,11 +83,14 @@ const exportFileWeb = (content, filename, mimeType) => {
 
 const exportFileMobile = async (content, filename, mimeType) => {
   try {
-    const FileSystem = await import('expo-file-system');
-    const Sharing    = await import('expo-sharing');
-    const filePath   = `${FileSystem.documentDirectory}${filename}`;
-    await FileSystem.writeAsStringAsync(filePath, content, {
-      encoding: FileSystem.EncodingType.UTF8,
+    // FIX: writeAsStringAsync moved to expo-file-system/legacy in newer Expo versions
+    const FileSystemModule = await import('expo-file-system/legacy');
+    const SharingModule    = await import('expo-sharing');
+    const FS      = FileSystemModule.default ?? FileSystemModule;
+    const Sharing = SharingModule.default    ?? SharingModule;
+    const filePath = `${FS.documentDirectory}${filename}`;
+    await FS.writeAsStringAsync(filePath, content, {
+      encoding: FS.EncodingType?.UTF8 ?? 'utf8',
     });
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
