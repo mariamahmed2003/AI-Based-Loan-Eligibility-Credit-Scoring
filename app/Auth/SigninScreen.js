@@ -23,65 +23,58 @@ import {
   View
 } from 'react-native';
 import FirebaseService from '../../services/FirebaseService';
-import { validateEmail, validatePassword } from '../../utils/validators';
+import { validateEmail } from '../../utils/validators';
 
 // Required so the browser redirects back to the app after Google auth
 WebBrowser.maybeCompleteAuthSession();
 
 const COLORS = {
-  primary: '#0A2540',       // Navy Blue
-  secondary: '#1F6AE1',     // Royal Blue
-  accent: '#2ECC71',        // Emerald Green
-  background: '#F5F7FA',    // Off-White
-  cardBackground: '#FFFFFF',// Pure White
-  text: '#2C2C2C',          // Dark Gray
-  textLight: '#6B7280',     // Light Gray
+  primary: '#0A2540',
+  secondary: '#1F6AE1',
+  accent: '#2ECC71',
+  background: '#F5F7FA',
+  cardBackground: '#FFFFFF',
+  text: '#2C2C2C',
+  textLight: '#6B7280',
   textWhite: '#FFFFFF',
   border: '#E5E7EB',
-  error: '#FF3B30',         // Error Red
+  error: '#FF3B30',
+};
+
+// ─────────────────────────────────────────────────────────────
+// Sign-in only needs to check the field isn't empty.
+// Complex rules (uppercase, symbols…) belong on sign-up only.
+// ─────────────────────────────────────────────────────────────
+const validateSignInPassword = (password) => {
+  if (!password || password.trim().length === 0) {
+    return { isValid: false, error: 'Password is required' };
+  }
+  return { isValid: true };
 };
 
 const SignInScreen = () => {
   const router = useRouter();
 
-  // Form & UI State
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [errors, setErrors] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail]                 = useState('');
+  const [password, setPassword]           = useState('');
+  const [errors, setErrors]               = useState({});
+  const [loading, setLoading]             = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-
-  // Added state for password visibility toggle to match SignUp logic
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword]   = useState(false);
 
   // ─────────────────────────────────────────────────────────────
-  // Google Auth Setup
-  //
-  // Replace the placeholder strings below with your real Client IDs.
-  //
-  // HOW TO GET YOUR CLIENT IDs:
-  //  1. Go to https://console.cloud.google.com
-  //  2. Select your Firebase project → APIs & Services → Credentials
-  //  3. Create OAuth 2.0 Client IDs for:
-  //       • Web application   → paste as webClientId
-  //       • Android           → paste as androidClientId
-  //       • iOS               → paste as iosClientId
-  //  4. For Expo Go testing:
-  //       • Use the Web client ID as expoClientId  OR
-  //       • Create an "Expo" client type if available
-  //
-  // Also add to app.json under "expo" → "scheme": "your-app-scheme"
-  // This is required for the redirect to work on mobile.
+  // Google Auth — selectAccount: true is what triggers the
+  // native "Choose an account" bottom sheet shown in the screenshot
+  // listing all Google accounts saved on the device.
   // ─────────────────────────────────────────────────────────────
   const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId:   '910946341679-0sdrn2i08tg7uq3p776ec2deg6uj8ong.apps.googleusercontent.com',
-    androidClientId:'910946341679-bcnvnnuik5kjbneg9gai1pnps09fret0.apps.googleusercontent.com',
-    iosClientId:    '910946341679-atfofuk0hca05q8le503s3il9311s7g9.apps.googleusercontent.com',
-    webClientId:    '910946341679-0sdrn2i08tg7uq3p776ec2deg6uj8ong.apps.googleusercontent.com',
-    // Forces the account chooser to always appear so the user can
-    // pick from saved accounts or tap "Add another account".
+    expoClientId:    '910946341679-0sdrn2i08tg7uq3p776ec2deg6uj8ong.apps.googleusercontent.com',
+    androidClientId: '910946341679-bcnvnnuik5kjbneg9gai1pnps09fret0.apps.googleusercontent.com',
+    iosClientId:     '910946341679-atfofuk0hca05q8le503s3il9311s7g9.apps.googleusercontent.com',
+    webClientId:     '910946341679-0sdrn2i08tg7uq3p776ec2deg6uj8ong.apps.googleusercontent.com',
+    // ✅ Forces the account picker to always appear so the user
+    //    can pick from all saved accounts (like your screenshot).
     selectAccount: true,
-    
   });
 
   // Listen for Google auth response
@@ -98,33 +91,41 @@ const SignInScreen = () => {
     }
   }, [response]);
 
-  // Exchange Google access token with Firebase
+  // ─────────────────────────────────────────────────────────────
+  // FIX: Exchange Google access token with Firebase, then clear
+  // any stale financial data that may have been left from a prior
+  // email/password account sharing the same Firebase UID.
+  // Firebase reuses the same UID when the email matches, so old
+  // financial data can persist across sign-in methods if unchecked.
+  // ─────────────────────────────────────────────────────────────
   const handleGoogleCredential = async (accessToken) => {
     try {
       setGoogleLoading(true);
-
-      // Sign in via FirebaseService.
-      // Your FirebaseService.signInWithGoogle should:
-      //   1. Build a GoogleAuthProvider credential from the accessToken
-      //   2. Call signInWithCredential(auth, credential)
-      //
-      // Example to add inside FirebaseService.js:
-      //
-      //   import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
-      //
-      //   static async signInWithGoogle(accessToken) {
-      //     try {
-      //       const credential = GoogleAuthProvider.credential(null, accessToken);
-      //       const result = await signInWithCredential(auth, credential);
-      //       return { success: true, user: result.user };
-      //     } catch (error) {
-      //       return { success: false, error: error.message };
-      //     }
-      //   }
-
       const result = await FirebaseService.signInWithGoogle(accessToken);
-
       if (result.success) {
+        // Get the UID from the signed-in user
+        const uid = result.user?.uid;
+        if (uid) {
+          // Check if there is existing financial data on this account.
+          // If hasData is true it means data was saved from a previous
+          // email/password session — clear it so Google sign-in always
+          // starts with a clean financial profile.
+          const existingData = await FirebaseService.getUserData(uid);
+          const fp = existingData?.data?.financialProfile;
+          if (fp?.hasData) {
+            await FirebaseService.updateUserData(uid, {
+              financialProfile: {
+                income: '',
+                expenses: '',
+                debts: '',
+                employment: '',
+                employmentYears: '',
+                requestedLoanAmount: '',
+                hasData: false,
+              },
+            });
+          }
+        }
         router.replace('/main/home');
       } else {
         Alert.alert('Google Sign In Failed', result.error);
@@ -138,10 +139,12 @@ const SignInScreen = () => {
 
   const validateForm = () => {
     const newErrors = {};
+
     const emailVal = validateEmail(email);
     if (!emailVal.isValid) newErrors.email = emailVal.error;
-    
-    const passVal = validatePassword(password);
+
+    // ✅ Relaxed validator — only checks field is not empty
+    const passVal = validateSignInPassword(password);
     if (!passVal.isValid) newErrors.password = passVal.error;
 
     setErrors(newErrors);
@@ -151,7 +154,6 @@ const SignInScreen = () => {
   const handleSignIn = async () => {
     if (!validateForm()) return;
     setLoading(true);
-
     try {
       const result = await FirebaseService.signIn(email, password);
       if (result.success) {
@@ -166,7 +168,7 @@ const SignInScreen = () => {
     }
   };
 
-  // Opens the native Google account chooser
+  // ✅ Tapping "Continue with Google" opens the account picker sheet
   const handleGoogleSignIn = async () => {
     if (!request) {
       Alert.alert('Not Ready', 'Google Sign In is initializing. Please try again.');
@@ -177,26 +179,26 @@ const SignInScreen = () => {
   };
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
-      
-      <ScrollView 
+
+      <ScrollView
         contentContainerStyle={styles.contentContainer}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         {/* Navigation */}
         <View style={styles.navHeader}>
-            <TouchableOpacity 
-                style={styles.backButton} 
-                onPress={() => router.back()}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
             <Ionicons name="arrow-back" size={28} color={COLORS.text} />
-            </TouchableOpacity>
+          </TouchableOpacity>
         </View>
 
         {/* Header */}
@@ -209,7 +211,7 @@ const SignInScreen = () => {
         <View style={styles.form}>
           <Text style={styles.inputLabel}>Email Address</Text>
           <View style={styles.inputContainer}>
-            <TextInput 
+            <TextInput
               style={[styles.input, errors.email && styles.inputError]}
               placeholder="Enter your Email"
               value={email}
@@ -227,40 +229,40 @@ const SignInScreen = () => {
           <Text style={styles.inputLabel}>Password</Text>
           <View style={styles.inputContainer}>
             <View style={styles.inputWrapper}>
-                <TextInput 
-                    style={[styles.input, errors.password && styles.inputError, { paddingRight: 55 }]}
-                    placeholder="Enter your password"
-                    value={password}
-                    onChangeText={(text) => {
-                    setPassword(text);
-                    if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
-                    }}
-                    secureTextEntry={!showPassword}
-                    cursorColor={COLORS.accent}
+              <TextInput
+                style={[styles.input, errors.password && styles.inputError, { paddingRight: 55 }]}
+                placeholder="Enter your password"
+                value={password}
+                onChangeText={(text) => {
+                  setPassword(text);
+                  if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
+                }}
+                secureTextEntry={!showPassword}
+                cursorColor={COLORS.accent}
+              />
+              <TouchableOpacity
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.iconInside}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={showPassword ? 'eye-outline' : 'eye-off-outline'}
+                  size={22}
+                  color={COLORS.textLight}
                 />
-                <TouchableOpacity
-                    onPress={() => setShowPassword(!showPassword)}
-                    style={styles.iconInside}
-                    activeOpacity={0.7}
-                >
-                    <Ionicons
-                    name={showPassword ? "eye-outline" : "eye-off-outline"}
-                    size={22}
-                    color={COLORS.textLight}
-                    />
-                </TouchableOpacity>
+              </TouchableOpacity>
             </View>
             {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
           </View>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.forgotPasswordContainer}
             onPress={() => Alert.alert('Forgot Password', 'Reset link sent.')}
           >
             <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
           </TouchableOpacity>
 
-          {/* ── Sign In Button ── */}
+          {/* Sign In Button */}
           <TouchableOpacity
             style={styles.signInButton}
             onPress={handleSignIn}
@@ -282,9 +284,9 @@ const SignInScreen = () => {
           <View style={styles.divider} />
         </View>
 
-        {/* Google Sign In */}
-        <TouchableOpacity 
-          style={[styles.googleButton, googleLoading && styles.googleButtonDisabled]} 
+        {/* ✅ Continue with Google — opens the account picker sheet */}
+        <TouchableOpacity
+          style={[styles.googleButton, googleLoading && styles.googleButtonDisabled]}
           onPress={handleGoogleSignIn}
           activeOpacity={0.8}
           disabled={googleLoading}
@@ -360,7 +362,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   input: {
-    backgroundColor: COLORS.background, 
+    backgroundColor: COLORS.background,
     borderRadius: 30,
     borderWidth: 1,
     borderColor: COLORS.background,
@@ -425,28 +427,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  googleButton: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    backgroundColor: '#FFFFFF', 
-    borderWidth: 1, 
-    borderColor: '#E0E0E0', 
-    borderRadius: 30, 
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 30,
     height: 58,
   },
   googleButtonDisabled: {
     opacity: 0.7,
   },
-  googleIcon: { 
-    width: 22, 
-    height: 22, 
-    marginRight: 12 
+  googleIcon: {
+    width: 22,
+    height: 22,
+    marginRight: 12,
   },
-  googleButtonText: { 
-    fontSize: 16, 
-    fontWeight: '600', 
-    color: '#000000'
+  googleButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
   },
 });
 

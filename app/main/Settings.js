@@ -1,23 +1,7 @@
-// app/(main)/settings.js
-// ═══════════════════════════════════════════════════════════════
-// SETTINGS SCREEN — Fully functional
-// ✅ Edit Profile (name, phone, email) — saved to Firebase
-// ✅ Change Password — Firebase reauthenticate + updatePassword
-// ✅ Privacy Settings — data visibility toggles saved to Firebase
-// ✅ Export Data — generates & shares CSV via expo-sharing
-// ✅ Clear Financial Data — wipes financialProfile in Firebase
-// ✅ Dark Mode — reads/writes ThemeContext
-// ✅ Push Notifications + Email Updates — persisted to Firebase
-// ✅ Biometric Auth — expo-local-authentication
-// ✅ Logout — FirebaseService.signOut → /welcomescreen
-// ✅ Delete Account — Firebase deleteUser
-// ═══════════════════════════════════════════════════════════════
+// app/main/settings.js
 
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
-import * as LocalAuthentication from 'expo-local-authentication';
 import { useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import { useContext, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -33,15 +17,105 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { ThemeContext } from '../../Context/themecontext'; // adjust path if needed
+import { ThemeContext } from '../../Context/themecontext';
 import FirebaseService from '../../services/FirebaseService';
 import COLORS from '../../utils/colors';
 
-// ── Helpers ────────────────────────────────────────────────────
+import { EmailAuthProvider, reauthenticateWithCredential, signOut, updatePassword } from 'firebase/auth';
+import { auth } from '../../config/firebaseConfig';
+
+// ─────────────────────────────────────────────────────────────
+// Platform-safe alert helper
+// On web, Alert.alert is not supported — falls back to window.confirm/alert
+// ─────────────────────────────────────────────────────────────
+const showAlert = (title, message, buttons) => {
+  if (Platform.OS === 'web') {
+    if (!buttons || buttons.length === 0) {
+      window.alert(`${title}\n\n${message || ''}`);
+      return;
+    }
+    // Find destructive or confirm button
+    const confirmBtn = buttons.find(b => b.style === 'destructive' || (b.text && b.text !== 'Cancel' && b.text !== 'OK'));
+    const cancelBtn  = buttons.find(b => b.style === 'cancel'      || b.text === 'Cancel');
+    if (confirmBtn && cancelBtn) {
+      const ok = window.confirm(`${title}\n\n${message || ''}`);
+      if (ok) confirmBtn.onPress?.();
+      else    cancelBtn.onPress?.();
+    } else {
+      window.alert(`${title}\n\n${message || ''}`);
+      const okBtn = buttons.find(b => b.text === 'OK' || (!b.style));
+      okBtn?.onPress?.();
+    }
+  } else {
+    Alert.alert(title, message, buttons);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// Platform-safe LocalAuthentication
+// expo-local-authentication is mobile-only
+// ─────────────────────────────────────────────────────────────
+const getBiometricModule = async () => {
+  if (Platform.OS === 'web') return null;
+  try {
+    return await import('expo-local-authentication');
+  } catch {
+    return null;
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// Platform-safe FileSystem & Sharing
+// expo-file-system and expo-sharing are mobile-only
+// On web: trigger a browser download instead
+// ─────────────────────────────────────────────────────────────
+const exportFileWeb = (content, filename, mimeType) => {
+  const blob = new Blob([content], { type: mimeType });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const exportFileMobile = async (content, filename, mimeType) => {
+  try {
+    const FileSystem = await import('expo-file-system');
+    const Sharing    = await import('expo-sharing');
+    const filePath   = `${FileSystem.documentDirectory}${filename}`;
+    await FileSystem.writeAsStringAsync(filePath, content, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    const canShare = await Sharing.isAvailableAsync();
+    if (canShare) {
+      await Sharing.shareAsync(filePath, {
+        mimeType,
+        dialogTitle: 'Export Your Data',
+        UTI: mimeType === 'text/csv' ? 'public.comma-separated-values-text' : undefined,
+      });
+    } else {
+      showAlert('Saved', `File saved to:\n${filePath}`, [{ text: 'OK' }]);
+    }
+  } catch (e) {
+    throw e;
+  }
+};
+
+const exportFile = async (content, filename, mimeType) => {
+  if (Platform.OS === 'web') {
+    exportFileWeb(content, filename, mimeType);
+  } else {
+    await exportFileMobile(content, filename, mimeType);
+  }
+};
+
 const safeStr = (v) => (v == null ? '' : String(v));
 
 // ═══════════════════════════════════════════════════════════════
-// MODAL WRAPPER — keyboard-aware, animated slide-up
+// MODAL WRAPPER
 // ═══════════════════════════════════════════════════════════════
 const SlideModal = ({ visible, onClose, title, children }) => {
   const slideAnim = useRef(new Animated.Value(600)).current;
@@ -73,9 +147,7 @@ const SlideModal = ({ visible, onClose, title, children }) => {
       >
         <TouchableOpacity style={modalStyles.backdrop} activeOpacity={1} onPress={onClose} />
         <Animated.View style={[modalStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
-          {/* Handle */}
           <View style={modalStyles.handle} />
-          {/* Header */}
           <View style={modalStyles.header}>
             <Text style={modalStyles.title}>{title}</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -176,38 +248,32 @@ const btnStyles = StyleSheet.create({
 const SettingsScreen = () => {
   const router = useRouter();
 
-  // ── Theme ──────────────────────────────────────────────────
-  // ThemeContext must expose { isDark, toggleTheme }
-  const themeCtx = useContext(ThemeContext);
-  const isDark    = themeCtx?.isDark    ?? false;
+  const themeCtx    = useContext(ThemeContext);
+  const isDark      = themeCtx?.isDark    ?? false;
   const toggleTheme = themeCtx?.toggleTheme ?? (() => {});
 
-  // ── Local settings state ───────────────────────────────────
   const [settings, setSettings] = useState({
     notifications: true,
     emailUpdates:  false,
     biometricAuth: false,
   });
 
-  // ── Privacy toggles state ──────────────────────────────────
   const [privacy, setPrivacy] = useState({
     shareDataForResearch:  false,
     showProfileToAdvisors: false,
     allowAnalytics:        true,
   });
 
-  // ── Modal visibility ───────────────────────────────────────
   const [modal, setModal] = useState({
-    editProfile:      false,
-    changePassword:   false,
-    privacySettings:  false,
-    exportData:       false,
+    editProfile:     false,
+    changePassword:  false,
+    privacySettings: false,
+    exportData:      false,
   });
 
   const openModal  = (key) => setModal(p => ({ ...p, [key]: true  }));
   const closeModal = (key) => setModal(p => ({ ...p, [key]: false }));
 
-  // ── User data ──────────────────────────────────────────────
   const [userData, setUserData] = useState(null);
 
   useEffect(() => { loadUserData(); }, []);
@@ -219,7 +285,6 @@ const SettingsScreen = () => {
         const result = await FirebaseService.getUserData(user.uid);
         if (result.success) {
           setUserData(result.data);
-          // Rehydrate persisted settings
           const s = result.data?.appSettings;
           if (s) {
             setSettings(prev => ({
@@ -238,7 +303,6 @@ const SettingsScreen = () => {
     }
   };
 
-  // ── Persist setting to Firebase ────────────────────────────
   const persistSetting = async (key, value) => {
     try {
       const user = FirebaseService.getCurrentUser();
@@ -258,61 +322,67 @@ const SettingsScreen = () => {
     await persistSetting(key, newVal);
   };
 
-  // ── Biometric toggle ────────────────────────────────────────
+  // ── Biometric Toggle ───────────────────────────────────────
+  // FIX: On web, biometric APIs don't exist — show a clear message instead of crashing
   const handleBiometricToggle = async () => {
+    if (Platform.OS === 'web') {
+      showAlert(
+        'Not Available on Web',
+        'Biometric authentication is only available in the mobile app.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+
     if (settings.biometricAuth) {
-      // Turn off
       setSettings(prev => ({ ...prev, biometricAuth: false }));
       await persistSetting('biometricAuth', false);
       return;
     }
-    // Check hardware support
+
+    const LocalAuthentication = await getBiometricModule();
+    if (!LocalAuthentication) {
+      showAlert('Not Supported', 'Biometric authentication is not available on this device.', [{ text: 'OK' }]);
+      return;
+    }
+
     const compatible = await LocalAuthentication.hasHardwareAsync();
     if (!compatible) {
-      Alert.alert('Not Supported', 'This device does not support biometric authentication.');
+      showAlert('Not Supported', 'This device does not support biometric authentication.', [{ text: 'OK' }]);
       return;
     }
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     if (!enrolled) {
-      Alert.alert(
-        'No Biometrics Enrolled',
-        'Please set up fingerprint or Face ID in your device settings first.',
-      );
+      showAlert('No Biometrics Enrolled', 'Please set up fingerprint or Face ID in your device settings first.', [{ text: 'OK' }]);
       return;
     }
-    // Prompt
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage:   'Verify your identity to enable biometric login',
-      fallbackLabel:   'Use Passcode',
-      cancelLabel:     'Cancel',
+      promptMessage:         'Verify your identity to enable biometric login',
+      fallbackLabel:         'Use Passcode',
+      cancelLabel:           'Cancel',
       disableDeviceFallback: false,
     });
     if (result.success) {
       setSettings(prev => ({ ...prev, biometricAuth: true }));
       await persistSetting('biometricAuth', true);
-      Alert.alert('✅ Enabled', 'Biometric authentication is now active.');
+      showAlert('✅ Enabled', 'Biometric authentication is now active.', [{ text: 'OK' }]);
     } else {
-      Alert.alert('Failed', 'Biometric verification failed. Please try again.');
+      showAlert('Failed', 'Biometric verification failed. Please try again.', [{ text: 'OK' }]);
     }
   };
 
   // ── Logout ─────────────────────────────────────────────────
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
+    showAlert('Logout', 'Are you sure you want to logout?', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Logout', style: 'destructive',
+        text: 'Logout',
+        style: 'destructive',
         onPress: async () => {
           try {
-            const result = await FirebaseService.signOut();
-            if (result.success) {
-              router.replace('/welcomescreen');
-            } else {
-              Alert.alert('Error', 'Failed to logout. Please try again.');
-            }
+            await signOut(auth);
           } catch (e) {
-            Alert.alert('Error', 'An unexpected error occurred.');
-            console.error('Logout error:', e);
+            showAlert('Error', e.message, [{ text: 'OK' }]);
           }
         },
       },
@@ -321,39 +391,39 @@ const SettingsScreen = () => {
 
   // ── Delete Account ─────────────────────────────────────────
   const handleDeleteAccount = () => {
-    Alert.alert(
+    showAlert(
       '⚠️ Delete Account',
       'This will permanently delete your account and ALL data. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete Forever', style: 'destructive',
+          text: 'Delete Forever',
+          style: 'destructive',
           onPress: () => {
-            Alert.alert(
+            showAlert(
               'Final Confirmation',
-              'Type "DELETE" to confirm account deletion.',
+              'Are you sure you want to permanently delete your account?',
               [
                 { text: 'Cancel', style: 'cancel' },
                 {
-                  text: 'Confirm Delete', style: 'destructive',
+                  text: 'Confirm Delete',
+                  style: 'destructive',
                   onPress: async () => {
                     try {
                       const user = FirebaseService.getCurrentUser();
                       if (user) {
-                        // Delete Firestore data first
                         await FirebaseService.deleteUserData?.(user.uid);
-                        // Delete Firebase Auth account
                         await user.delete();
-                        router.replace('/welcomescreen');
                       }
                     } catch (e) {
                       if (e.code === 'auth/requires-recent-login') {
-                        Alert.alert(
+                        showAlert(
                           'Re-authentication Required',
                           'For security, please logout and log back in before deleting your account.',
+                          [{ text: 'OK' }],
                         );
                       } else {
-                        Alert.alert('Error', 'Failed to delete account. Please try again.');
+                        showAlert('Error', 'Failed to delete account. Please try again.', [{ text: 'OK' }]);
                         console.error('Delete account error:', e);
                       }
                     }
@@ -369,13 +439,14 @@ const SettingsScreen = () => {
 
   // ── Clear Data ─────────────────────────────────────────────
   const handleClearData = () => {
-    Alert.alert(
+    showAlert(
       'Clear Financial Data',
       'This will delete all your financial data and reset your credit score. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear', style: 'destructive',
+          text: 'Clear',
+          style: 'destructive',
           onPress: async () => {
             try {
               const user = FirebaseService.getCurrentUser();
@@ -387,10 +458,10 @@ const SettingsScreen = () => {
                     requestedLoanAmount: '', hasData: false,
                   },
                 });
-                Alert.alert('✅ Done', 'All financial data has been cleared.');
+                showAlert('✅ Done', 'All financial data has been cleared.', [{ text: 'OK' }]);
               }
             } catch (e) {
-              Alert.alert('Error', 'Failed to clear data. Please try again.');
+              showAlert('Error', 'Failed to clear data. Please try again.', [{ text: 'OK' }]);
               console.error('Clear data error:', e);
             }
           },
@@ -405,13 +476,11 @@ const SettingsScreen = () => {
       contentContainerStyle={styles.contentContainer}
       keyboardShouldPersistTaps="handled"
     >
-      {/* ── Header ─────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
         <Text style={styles.subtitle}>Manage your app preferences</Text>
       </View>
 
-      {/* ── App Preferences ────────────────────────────────── */}
       <SectionCard title="App Preferences">
         <SettingItem
           icon="notifications-outline"
@@ -455,76 +524,56 @@ const SettingsScreen = () => {
         <SettingItem
           icon="finger-print-outline"
           title="Biometric Authentication"
-          description="Use fingerprint or Face ID"
+          description={Platform.OS === 'web' ? 'Available on mobile app only' : 'Use fingerprint or Face ID'}
           rightComponent={
-            <Switch
-              value={settings.biometricAuth}
-              onValueChange={handleBiometricToggle}
-              trackColor={{ false: COLORS.border, true: COLORS.primary }}
-              thumbColor={COLORS.white}
-            />
+            Platform.OS === 'web' ? (
+              <View style={styles.webOnlyBadge}>
+                <Text style={styles.webOnlyText}>Mobile only</Text>
+              </View>
+            ) : (
+              <Switch
+                value={settings.biometricAuth}
+                onValueChange={handleBiometricToggle}
+                trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                thumbColor={COLORS.white}
+              />
+            )
           }
           last
         />
       </SectionCard>
 
-      {/* ── Account ────────────────────────────────────────── */}
       <SectionCard title="Account">
-        <SettingButton
-          icon="person-outline"
-          title="Edit Profile"
-          onPress={() => openModal('editProfile')}
-        />
-        <SettingButton
-          icon="key-outline"
-          title="Change Password"
-          onPress={() => openModal('changePassword')}
-        />
-        <SettingButton
-          icon="shield-checkmark-outline"
-          title="Privacy Settings"
-          onPress={() => openModal('privacySettings')}
-          last
-        />
+        <SettingButton icon="person-outline" title="Edit Profile" onPress={() => openModal('editProfile')} />
+        <SettingButton icon="key-outline" title="Change Password" onPress={() => openModal('changePassword')} />
+        <SettingButton icon="shield-checkmark-outline" title="Privacy Settings" onPress={() => openModal('privacySettings')} last />
       </SectionCard>
 
-      {/* ── Data Management ────────────────────────────────── */}
       <SectionCard title="Data Management">
-        <SettingButton
-          icon="download-outline"
-          title="Export My Data"
-          onPress={() => openModal('exportData')}
-        />
-        <SettingButton
-          icon="trash-outline"
-          title="Clear Financial Data"
-          onPress={handleClearData}
-          dangerous
-          last
-        />
+        <SettingButton icon="download-outline" title="Export My Data" onPress={() => openModal('exportData')} />
+        <SettingButton icon="trash-outline" title="Clear Financial Data" onPress={handleClearData} dangerous last />
       </SectionCard>
 
-      {/* ── Support ────────────────────────────────────────── */}
       <SectionCard title="Support">
         <SettingButton
           icon="help-circle-outline"
           title="Help Center"
-          onPress={() => Alert.alert('Help Center', 'For support, email us at support@ailoan.app')}
+          onPress={() => showAlert('Help Center', 'For support, email us at support@ailoan.app', [{ text: 'OK' }])}
         />
         <SettingButton
           icon="document-text-outline"
           title="Terms of Service"
-          onPress={() => Alert.alert('Terms of Service', 'By using this app you agree to our terms. Full terms available at ailoan.app/terms')}
+          onPress={() => showAlert('Terms of Service', 'By using this app you agree to our terms. Full terms available at ailoan.app/terms', [{ text: 'OK' }])}
         />
         <SettingButton
           icon="shield-outline"
           title="Privacy Policy"
-          onPress={() => Alert.alert('Privacy Policy', 'We protect your data per Egyptian data protection laws. Full policy at ailoan.app/privacy')}
+          onPress={() => showAlert('Privacy Policy', 'We protect your data per Egyptian data protection laws. Full policy at ailoan.app/privacy', [{ text: 'OK' }])}
         />
         <SettingButton
           icon="information-circle-outline"
           title="About App"
-          onPress={() => Alert.alert(
+          onPress={() => showAlert(
             'AI Loan Eligibility App',
             'Version 1.0.0\n\nAI-powered credit scoring and loan eligibility assessment for Egyptian banking standards.\n\n© 2025 AI Loan App',
             [{ text: 'OK' }],
@@ -533,46 +582,33 @@ const SettingsScreen = () => {
         />
       </SectionCard>
 
-      {/* ── Logout ─────────────────────────────────────────── */}
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
         <Ionicons name="log-out-outline" size={24} color={COLORS.error} />
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
 
-      {/* ── Delete Account ─────────────────────────────────── */}
       <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
         <Text style={styles.deleteText}>Delete Account</Text>
       </TouchableOpacity>
 
       <Text style={styles.versionText}>Version 1.0.0</Text>
 
-      {/* ══════════════════════════════════════════════════════
-          MODALS
-      ══════════════════════════════════════════════════════ */}
-
-      {/* Edit Profile */}
       <EditProfileModal
         visible={modal.editProfile}
         onClose={() => closeModal('editProfile')}
         userData={userData}
         onSaved={loadUserData}
       />
-
-      {/* Change Password */}
       <ChangePasswordModal
         visible={modal.changePassword}
         onClose={() => closeModal('changePassword')}
       />
-
-      {/* Privacy Settings */}
       <PrivacyModal
         visible={modal.privacySettings}
         onClose={() => closeModal('privacySettings')}
         privacy={privacy}
         setPrivacy={setPrivacy}
       />
-
-      {/* Export Data */}
       <ExportDataModal
         visible={modal.exportData}
         onClose={() => closeModal('exportData')}
@@ -586,7 +622,7 @@ const SettingsScreen = () => {
 // EDIT PROFILE MODAL
 // ═══════════════════════════════════════════════════════════════
 const EditProfileModal = ({ visible, onClose, userData, onSaved }) => {
-  const [form, setForm]     = useState({ displayName: '', phone: '', email: '' });
+  const [form, setForm]       = useState({ displayName: '', phone: '', email: '' });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -601,29 +637,27 @@ const EditProfileModal = ({ visible, onClose, userData, onSaved }) => {
 
   const handleSave = async () => {
     if (!form.displayName.trim()) {
-      Alert.alert('Validation', 'Name is required.'); return;
+      showAlert('Validation', 'Name is required.', [{ text: 'OK' }]); return;
     }
     if (form.phone && !/^(\+20|0)[0-9]{10}$/.test(form.phone.replace(/\s/g, ''))) {
-      Alert.alert('Validation', 'Please enter a valid Egyptian phone number (e.g. 01012345678).'); return;
+      showAlert('Validation', 'Please enter a valid Egyptian phone number (e.g. 01012345678).', [{ text: 'OK' }]); return;
     }
     setLoading(true);
     try {
       const user = FirebaseService.getCurrentUser();
       if (user) {
-        // Update Auth display name
         await user.updateProfile({ displayName: form.displayName.trim() });
-        // Update Firestore
         await FirebaseService.updateUserData(user.uid, {
           displayName: form.displayName.trim(),
           name:        form.displayName.trim(),
           phone:       form.phone.trim(),
         });
         await onSaved();
-        Alert.alert('✅ Saved', 'Profile updated successfully.');
+        showAlert('✅ Saved', 'Profile updated successfully.', [{ text: 'OK' }]);
         onClose();
       }
     } catch (e) {
-      Alert.alert('Error', 'Failed to update profile. Please try again.');
+      showAlert('Error', 'Failed to update profile. Please try again.', [{ text: 'OK' }]);
       console.error('Edit profile error:', e);
     } finally {
       setLoading(false);
@@ -673,7 +707,7 @@ const ChangePasswordModal = ({ visible, onClose }) => {
     newPassword:     '',
     confirmPassword: '',
   });
-  const [loading, setLoading] = useState(false);
+  const [loading,     setLoading]     = useState(false);
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew,     setShowNew]     = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -686,36 +720,29 @@ const ChangePasswordModal = ({ visible, onClose }) => {
   useEffect(() => { if (!visible) reset(); }, [visible]);
 
   const handleChange = async () => {
-    if (!form.currentPassword) { Alert.alert('Validation', 'Enter your current password.'); return; }
-    if (form.newPassword.length < 8) { Alert.alert('Validation', 'New password must be at least 8 characters.'); return; }
-    if (!/[A-Z]/.test(form.newPassword)) { Alert.alert('Validation', 'Password must contain at least one uppercase letter.'); return; }
-    if (!/[0-9]/.test(form.newPassword)) { Alert.alert('Validation', 'Password must contain at least one number.'); return; }
-    if (form.newPassword !== form.confirmPassword) { Alert.alert('Validation', 'Passwords do not match.'); return; }
-    if (form.newPassword === form.currentPassword) { Alert.alert('Validation', 'New password must be different from current.'); return; }
+    if (!form.currentPassword) { showAlert('Validation', 'Enter your current password.', [{ text: 'OK' }]); return; }
+    if (form.newPassword.length < 8) { showAlert('Validation', 'New password must be at least 8 characters.', [{ text: 'OK' }]); return; }
+    if (!/[A-Z]/.test(form.newPassword)) { showAlert('Validation', 'Password must contain at least one uppercase letter.', [{ text: 'OK' }]); return; }
+    if (!/[0-9]/.test(form.newPassword)) { showAlert('Validation', 'Password must contain at least one number.', [{ text: 'OK' }]); return; }
+    if (form.newPassword !== form.confirmPassword) { showAlert('Validation', 'Passwords do not match.', [{ text: 'OK' }]); return; }
+    if (form.newPassword === form.currentPassword) { showAlert('Validation', 'New password must be different from current.', [{ text: 'OK' }]); return; }
 
     setLoading(true);
     try {
-      const firebase = await import('firebase/auth');
-      const auth = firebase.getAuth();
-      const user = auth.currentUser;
-
-      // Re-authenticate first
-      const credential = firebase.EmailAuthProvider.credential(user.email, form.currentPassword);
-      await firebase.reauthenticateWithCredential(user, credential);
-
-      // Update password
-      await firebase.updatePassword(user, form.newPassword);
-
-      Alert.alert('✅ Success', 'Password changed successfully.');
+      const user       = auth.currentUser;
+      const credential = EmailAuthProvider.credential(user.email, form.currentPassword);
+      await reauthenticateWithCredential(user, credential);
+      await updatePassword(user, form.newPassword);
+      showAlert('✅ Success', 'Password changed successfully.', [{ text: 'OK' }]);
       reset();
       onClose();
     } catch (e) {
       if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
-        Alert.alert('Error', 'Current password is incorrect.');
+        showAlert('Error', 'Current password is incorrect.', [{ text: 'OK' }]);
       } else if (e.code === 'auth/too-many-requests') {
-        Alert.alert('Error', 'Too many attempts. Please try again later.');
+        showAlert('Error', 'Too many attempts. Please try again later.', [{ text: 'OK' }]);
       } else {
-        Alert.alert('Error', 'Failed to change password. Please try again.');
+        showAlert('Error', 'Failed to change password. Please try again.', [{ text: 'OK' }]);
         console.error('Change password error:', e);
       }
     } finally {
@@ -750,11 +777,10 @@ const ChangePasswordModal = ({ visible, onClose }) => {
   return (
     <SlideModal visible={visible} onClose={onClose} title="Change Password">
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <PasswordField label="Current Password" field="currentPassword" show={showCurrent} setShow={setShowCurrent} />
-        <PasswordField label="New Password"     field="newPassword"     show={showNew}     setShow={setShowNew}     />
+        <PasswordField label="Current Password"     field="currentPassword" show={showCurrent} setShow={setShowCurrent} />
+        <PasswordField label="New Password"         field="newPassword"     show={showNew}     setShow={setShowNew}     />
         <PasswordField label="Confirm New Password" field="confirmPassword" show={showConfirm} setShow={setShowConfirm} />
 
-        {/* Password requirements */}
         <View style={{ backgroundColor: '#F0F9FF', borderRadius: 10, padding: 12, marginBottom: 16 }}>
           <Text style={{ fontSize: 12, fontWeight: '700', color: '#0369A1', marginBottom: 6 }}>Password Requirements:</Text>
           {[
@@ -789,35 +815,20 @@ const PrivacyModal = ({ visible, onClose, privacy, setPrivacy }) => {
       const user = FirebaseService.getCurrentUser();
       if (user) {
         await FirebaseService.updateUserData(user.uid, { privacySettings: privacy });
-        Alert.alert('✅ Saved', 'Privacy settings updated.');
+        showAlert('✅ Saved', 'Privacy settings updated.', [{ text: 'OK' }]);
         onClose();
       }
     } catch (e) {
-      Alert.alert('Error', 'Failed to save privacy settings.');
+      showAlert('Error', 'Failed to save privacy settings.', [{ text: 'OK' }]);
     } finally {
       setLoading(false);
     }
   };
 
   const privacyItems = [
-    {
-      key:   'shareDataForResearch',
-      title: 'Share Data for Research',
-      desc:  'Allow anonymised data to improve our AI models.',
-      icon:  'analytics-outline',
-    },
-    {
-      key:   'showProfileToAdvisors',
-      title: 'Visible to Financial Advisors',
-      desc:  'Let certified advisors view your credit profile.',
-      icon:  'people-outline',
-    },
-    {
-      key:   'allowAnalytics',
-      title: 'App Usage Analytics',
-      desc:  'Help us improve the app by sharing usage statistics.',
-      icon:  'bar-chart-outline',
-    },
+    { key: 'shareDataForResearch',  title: 'Share Data for Research',       desc: 'Allow anonymised data to improve our AI models.',        icon: 'analytics-outline' },
+    { key: 'showProfileToAdvisors', title: 'Visible to Financial Advisors', desc: 'Let certified advisors view your credit profile.',       icon: 'people-outline'    },
+    { key: 'allowAnalytics',        title: 'App Usage Analytics',           desc: 'Help us improve the app by sharing usage statistics.',  icon: 'bar-chart-outline' },
   ];
 
   return (
@@ -869,6 +880,9 @@ const PrivacyModal = ({ visible, onClose, privacy, setPrivacy }) => {
 
 // ═══════════════════════════════════════════════════════════════
 // EXPORT DATA MODAL
+// FIX: Uses platform-aware exportFile helper instead of directly
+// calling expo-file-system / expo-sharing (which crash on web).
+// On web it triggers a browser download via Blob + <a> tag.
 // ═══════════════════════════════════════════════════════════════
 const ExportDataModal = ({ visible, onClose, userData }) => {
   const [exporting, setExporting] = useState(false);
@@ -898,26 +912,14 @@ const ExportDataModal = ({ visible, onClose, userData }) => {
   };
 
   const handleExportCSV = async () => {
-    if (!userData) { Alert.alert('No Data', 'No data available to export yet.'); return; }
+    if (!userData) { showAlert('No Data', 'No data available to export yet.', [{ text: 'OK' }]); return; }
     setExporting(true);
     try {
       const csv      = buildCSV();
       const filename = `AILoan_Export_${Date.now()}.csv`;
-      const filePath = `${FileSystem.documentDirectory}${filename}`;
-      await FileSystem.writeAsStringAsync(filePath, csv, { encoding: FileSystem.EncodingType.UTF8 });
-
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(filePath, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Export Your Data',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        Alert.alert('Saved', `File saved to:\n${filePath}`);
-      }
+      await exportFile(csv, filename, 'text/csv');
     } catch (e) {
-      Alert.alert('Error', 'Failed to export data. Please try again.');
+      showAlert('Error', 'Failed to export data. Please try again.', [{ text: 'OK' }]);
       console.error('Export CSV error:', e);
     } finally {
       setExporting(false);
@@ -925,34 +927,19 @@ const ExportDataModal = ({ visible, onClose, userData }) => {
   };
 
   const handleExportJSON = async () => {
-    if (!userData) { Alert.alert('No Data', 'No data available to export yet.'); return; }
+    if (!userData) { showAlert('No Data', 'No data available to export yet.', [{ text: 'OK' }]); return; }
     setExporting(true);
     try {
       const safe = {
-        personalInfo: {
-          displayName: userData?.displayName || userData?.name,
-          email:       userData?.email,
-          phone:       userData?.phone,
-        },
+        personalInfo:     { displayName: userData?.displayName || userData?.name, email: userData?.email, phone: userData?.phone },
         financialProfile: userData?.financialProfile || {},
-        exportedAt: new Date().toISOString(),
+        exportedAt:       new Date().toISOString(),
       };
       const json     = JSON.stringify(safe, null, 2);
       const filename = `AILoan_Export_${Date.now()}.json`;
-      const filePath = `${FileSystem.documentDirectory}${filename}`;
-      await FileSystem.writeAsStringAsync(filePath, json, { encoding: FileSystem.EncodingType.UTF8 });
-
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(filePath, {
-          mimeType: 'application/json',
-          dialogTitle: 'Export Your Data',
-        });
-      } else {
-        Alert.alert('Saved', `File saved to:\n${filePath}`);
-      }
+      await exportFile(json, filename, 'application/json');
     } catch (e) {
-      Alert.alert('Error', 'Failed to export data. Please try again.');
+      showAlert('Error', 'Failed to export data. Please try again.', [{ text: 'OK' }]);
       console.error('Export JSON error:', e);
     } finally {
       setExporting(false);
@@ -965,13 +952,7 @@ const ExportDataModal = ({ visible, onClose, userData }) => {
         Download a copy of all your personal and financial data. You can open these files in Excel or any text editor.
       </Text>
 
-      {/* CSV */}
-      <TouchableOpacity
-        style={exportStyles.option}
-        onPress={handleExportCSV}
-        disabled={exporting}
-        activeOpacity={0.8}
-      >
+      <TouchableOpacity style={exportStyles.option} onPress={handleExportCSV} disabled={exporting} activeOpacity={0.8}>
         <View style={[exportStyles.iconBox, { backgroundColor: '#D1FAE5' }]}>
           <Ionicons name="grid-outline" size={26} color="#059669" />
         </View>
@@ -982,13 +963,7 @@ const ExportDataModal = ({ visible, onClose, userData }) => {
         <Ionicons name="download-outline" size={20} color="#6B7280" />
       </TouchableOpacity>
 
-      {/* JSON */}
-      <TouchableOpacity
-        style={exportStyles.option}
-        onPress={handleExportJSON}
-        disabled={exporting}
-        activeOpacity={0.8}
-      >
+      <TouchableOpacity style={exportStyles.option} onPress={handleExportJSON} disabled={exporting} activeOpacity={0.8}>
         <View style={[exportStyles.iconBox, { backgroundColor: '#DBEAFE' }]}>
           <Ionicons name="code-outline" size={26} color="#2563EB" />
         </View>
@@ -1000,9 +975,7 @@ const ExportDataModal = ({ visible, onClose, userData }) => {
       </TouchableOpacity>
 
       {exporting && (
-        <Text style={{ textAlign: 'center', color: '#6B7280', marginTop: 12 }}>
-          Preparing your export…
-        </Text>
+        <Text style={{ textAlign: 'center', color: '#6B7280', marginTop: 12 }}>Preparing your export…</Text>
       )}
 
       <View style={{ backgroundColor: '#F0FFF4', borderRadius: 10, padding: 12, marginTop: 20 }}>
@@ -1020,13 +993,13 @@ const exportStyles = StyleSheet.create({
     borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 14,
     padding: 16, marginBottom: 12,
   },
-  iconBox: { width: 48, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  iconBox:     { width: 48, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   optionTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 3 },
   optionDesc:  { fontSize: 12, color: '#6B7280' },
 });
 
 // ═══════════════════════════════════════════════════════════════
-// REUSABLE SECTION CARD
+// REUSABLE COMPONENTS
 // ═══════════════════════════════════════════════════════════════
 const SectionCard = ({ title, children }) => (
   <View style={styles.section}>
@@ -1035,9 +1008,6 @@ const SectionCard = ({ title, children }) => (
   </View>
 );
 
-// ═══════════════════════════════════════════════════════════════
-// SETTING ITEM (with Switch on right)
-// ═══════════════════════════════════════════════════════════════
 const SettingItem = ({ icon, title, description, rightComponent, last }) => (
   <View style={[styles.settingItem, last && { borderBottomWidth: 0 }]}>
     <View style={styles.settingLeft}>
@@ -1053,9 +1023,6 @@ const SettingItem = ({ icon, title, description, rightComponent, last }) => (
   </View>
 );
 
-// ═══════════════════════════════════════════════════════════════
-// SETTING BUTTON (chevron row)
-// ═══════════════════════════════════════════════════════════════
 const SettingButton = ({ icon, title, onPress, dangerous, last }) => (
   <TouchableOpacity
     style={[styles.settingButton, last && { borderBottomWidth: 0 }]}
@@ -1066,9 +1033,7 @@ const SettingButton = ({ icon, title, onPress, dangerous, last }) => (
       <View style={styles.settingIconContainer}>
         <Ionicons name={icon} size={22} color={dangerous ? COLORS.error : COLORS.primary} />
       </View>
-      <Text style={[styles.settingButtonTitle, dangerous && { color: COLORS.error }]}>
-        {title}
-      </Text>
+      <Text style={[styles.settingButtonTitle, dangerous && { color: COLORS.error }]}>{title}</Text>
     </View>
     <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
   </TouchableOpacity>
@@ -1102,11 +1067,11 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
-  settingLeft:           { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  settingIconContainer:  { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  settingContent:        { flex: 1 },
-  settingTitle:          { fontSize: 15, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
-  settingDescription:    { fontSize: 12, color: COLORS.textLight },
+  settingLeft:          { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  settingIconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  settingContent:       { flex: 1 },
+  settingTitle:         { fontSize: 15, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
+  settingDescription:   { fontSize: 12, color: COLORS.textLight },
 
   settingButton: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -1126,6 +1091,13 @@ const styles = StyleSheet.create({
   deleteButton: { alignItems: 'center', padding: 12 },
   deleteText:   { fontSize: 14, color: COLORS.textLight, textDecorationLine: 'underline' },
   versionText:  { textAlign: 'center', fontSize: 12, color: COLORS.textLight, marginTop: 12 },
+
+  // FIX: Badge shown instead of Switch for mobile-only features on web
+  webOnlyBadge: {
+    backgroundColor: '#F3F4F6', borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 4,
+  },
+  webOnlyText: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
 });
 
 export default SettingsScreen;

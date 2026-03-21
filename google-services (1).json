@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "910946341679",
+    "project_id": "loaneligibilitycreditscoring",
+    "storage_bucket": "loaneligibilitycreditscoring.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:910946341679:android:ee0698e1f1d82269a307da",
+        "android_client_info": {
+          "package_name": "com.mariamelnagar.loanscoring"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "910946341679-bcnvnnuik5kjbneg9gai1pnps09fret0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mariamelnagar.loanscoring",
+            "certificate_hash": "09514e3d3d00e0457a0bf6bd801f33d758485d6c"
+          }
+        },
+        {
+          "client_id": "910946341679-0sdrn2i08tg7uq3p776ec2deg6uj8ong.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAJ6tB3E4e8q5eiobYihY6cvi_qrioTe_s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "910946341679-0sdrn2i08tg7uq3p776ec2deg6uj8ong.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "910946341679-atfofuk0hca05q8le503s3il9311s7g9.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.loaneligibility.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -59,23 +59,32 @@ class LoanDecisionService {
     }
 
     // ── Step 2: Try OpenAI prediction ─────────────────────────
-    const profileData = {
-      ...profile.toJSON(),
-      dti:                    profile.calculateDTI(),
-      disposableIncome:       profile.calculateDisposableIncome(),
-      savingsRate:            profile.calculateSavingsRate(),
-      employmentStabilityScore: profile.getEmploymentStabilityScore(),
-      loanToIncomeRatio:      profile.calculateLoanToIncomeRatio(),
-    };
+    // FIX: wrap in try/catch so any network error (no internet, CORS,
+    // missing API key, Expo Go restriction) is silently swallowed and
+    // the app falls through to the rule-based fallback without showing
+    // any error message to the user.
+    try {
+      const profileData = {
+        ...profile.toJSON(),
+        dti:                      profile.calculateDTI(),
+        disposableIncome:         profile.calculateDisposableIncome(),
+        savingsRate:              profile.calculateSavingsRate(),
+        employmentStabilityScore: profile.getEmploymentStabilityScore(),
+        loanToIncomeRatio:        profile.calculateLoanToIncomeRatio(),
+      };
 
-    const aiResult = await predictLoanEligibility(profileData);
+      const aiResult = await predictLoanEligibility(profileData);
 
-    if (aiResult.success && aiResult.data) {
-      return this._buildFromAI(aiResult.data, profile);
+      if (aiResult.success && aiResult.data) {
+        return this._buildFromAI(aiResult.data, profile);
+      }
+    } catch (_err) {
+      // Silent fallback — OpenAI is unavailable (network error, no API key,
+      // CORS block, Expo Go restriction). Rule-based result is used instead.
+      // No error is shown to the user.
     }
 
     // ── Step 3: Rule-based fallback ────────────────────────────
-    console.warn('OpenAI unavailable — using rule-based fallback');
     return this._buildFromRules(profile);
   }
 
@@ -300,11 +309,12 @@ class LoanDecisionService {
     else if (score >= 600) multiplier = 2.5;
 
     const maxByIncome      = annualIncome * multiplier;
-    const maxInstallment   = profile.monthlyIncome * 0.40; // Egyptian 40% rule
-    const maxByInstallment = maxInstallment * 84;          // 84 months max
+    const maxInstallment   = profile.monthlyIncome * 0.40;
+    const maxByInstallment = maxInstallment * 84;
 
     return Math.floor(Math.min(maxByIncome, maxByInstallment));
   }
+  
 }
 
 export default LoanDecisionService;

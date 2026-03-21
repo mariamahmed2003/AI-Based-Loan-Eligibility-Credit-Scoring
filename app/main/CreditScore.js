@@ -6,7 +6,6 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { Ionicons } from '@expo/vector-icons';
-import CryptoJS from 'crypto-js';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -27,18 +26,38 @@ import COLORS from '../../utils/colors';
 
 const screenWidth = Dimensions.get('window').width;
 
-// ── Must match the key used in financial.js ─────────────────────
+// ── FIX: Same pure-JS XOR cipher as financial.js ───────────────
+// crypto-js requires native crypto APIs not available in Expo Go.
+// Must match the key used in financial.js exactly.
 const SECRET_KEY = 'your-secure-secret-key-here';
+
+const xorDecrypt = (encoded, key) => {
+  if (!encoded) return '';
+  try {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(escape(atob(encoded)));
+    } catch {
+      decoded = atob(encoded);
+    }
+    let result = '';
+    for (let i = 0; i < decoded.length; i++) {
+      result += String.fromCharCode(
+        decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length)
+      );
+    }
+    return result;
+  } catch (error) {
+    console.warn('Decryption failed, returning raw value:', error.message);
+    return encoded;
+  }
+};
 
 const decryptAES = (ciphertext) => {
   if (!ciphertext) return '';
-  try {
-    const bytes = CryptoJS.AES.decrypt(ciphertext, SECRET_KEY);
-    return bytes.toString(CryptoJS.enc.Utf8);
-  } catch (error) {
-    console.error('Decryption failed', error);
-    return '';
-  }
+  // Graceful fallback: plain numbers stored before encryption was added
+  if (/^\d+(\.\d+)?$/.test(String(ciphertext).trim())) return String(ciphertext).trim();
+  return xorDecrypt(ciphertext, SECRET_KEY);
 };
 
 // Safe parse: returns a number or 0, never NaN
@@ -48,14 +67,6 @@ const safeNum = (val) => {
 };
 
 // ── FIX 1: Correct risk level based on actual numeric score ─────
-// The rule-based calculator can return a mismatched riskLevel label.
-// This function recomputes it deterministically so the label always
-// matches the position on the gradient bar shown in RiskChart:
-//   300–549  → Very High  (red zone)
-//   550–579  → High       (orange zone)
-//   580–649  → Moderate   (yellow zone)
-//   650–749  → Low        (dark-green zone)
-//   750–850  → Very Low   (bright-green zone)
 const getRiskLevelFromScore = (score) => {
   if (score >= 750) return 'Very Low';
   if (score >= 650) return 'Low';
@@ -73,21 +84,11 @@ const getRatingFromScore = (score) => {
 };
 
 // ── FIX 2: Robust age derivation ────────────────────────────────
-// Handles all possible field locations and formats:
-//   • Root-level dateOfBirth (ISO string or YYYY-MM-DD)
-//   • Nested profile.dateOfBirth
-//   • Root-level age (number or numeric string)
-//   • Nested profile.age
-//   • Router params (freshAge) passed in as a plain number
-// Falls back to 25 — a neutral adult age that does not skew scoring.
 const deriveAge = (data, freshAge = null) => {
-  // ── Priority 0: fresh router param ──────────────────────────
   if (freshAge !== null && freshAge !== undefined && freshAge !== '') {
     const parsed = parseInt(freshAge, 10);
     if (!isNaN(parsed) && parsed > 0 && parsed < 100) return parsed;
   }
-
-  // ── Priority 1: dateOfBirth at root level ────────────────────
   if (data?.dateOfBirth) {
     const dob = new Date(data.dateOfBirth);
     if (!isNaN(dob.getTime())) {
@@ -95,8 +96,6 @@ const deriveAge = (data, freshAge = null) => {
       if (age > 0 && age < 100) return age;
     }
   }
-
-  // ── Priority 2: dateOfBirth nested under profile ─────────────
   if (data?.profile?.dateOfBirth) {
     const dob = new Date(data.profile.dateOfBirth);
     if (!isNaN(dob.getTime())) {
@@ -104,8 +103,6 @@ const deriveAge = (data, freshAge = null) => {
       if (age > 0 && age < 100) return age;
     }
   }
-
-  // ── Priority 3: dateOfBirth inside financialProfile ──────────
   if (data?.financialProfile?.dateOfBirth) {
     const dob = new Date(data.financialProfile.dateOfBirth);
     if (!isNaN(dob.getTime())) {
@@ -113,32 +110,22 @@ const deriveAge = (data, freshAge = null) => {
       if (age > 0 && age < 100) return age;
     }
   }
-
-  // ── Priority 4: age stored directly as a number at root ──────
   if (data?.age !== undefined && data?.age !== null && data?.age !== '') {
     const parsed = parseInt(data.age, 10);
     if (!isNaN(parsed) && parsed > 0 && parsed < 100) return parsed;
   }
-
-  // ── Priority 5: age nested under profile ─────────────────────
   if (data?.profile?.age !== undefined && data?.profile?.age !== null) {
     const parsed = parseInt(data.profile.age, 10);
     if (!isNaN(parsed) && parsed > 0 && parsed < 100) return parsed;
   }
-
-  // ── Priority 6: age nested under financialProfile ────────────
   if (data?.financialProfile?.age !== undefined && data?.financialProfile?.age !== null) {
     const parsed = parseInt(data.financialProfile.age, 10);
     if (!isNaN(parsed) && parsed > 0 && parsed < 100) return parsed;
   }
-
-  // ── Priority 7: birthYear stored directly ────────────────────
   if (data?.birthYear) {
     const age = new Date().getFullYear() - parseInt(data.birthYear, 10);
     if (age > 0 && age < 100) return age;
   }
-
-  // ── Fallback: neutral adult, does not skew scoring ───────────
   console.warn('[deriveAge] Could not determine age from profile data. Using fallback: 25');
   return 25;
 };
@@ -164,8 +151,7 @@ const CreditScoreScreen = () => {
         if (result.success) {
           setUserData(result.data);
 
-          const hasFreshParams =
-            params?.freshIncome && params.freshIncome !== '';
+          const hasFreshParams = params?.freshIncome && params.freshIncome !== '';
 
           if (hasFreshParams) {
             const freshData = {
@@ -180,7 +166,6 @@ const CreditScoreScreen = () => {
                 requestedLoanAmount: params.freshLoanAmount,
               },
             };
-            // Pass freshAge separately so deriveAge can pick it up at highest priority
             await calculateScore(freshData, true, params.freshAge ?? null);
           } else if (result.data.financialProfile?.hasData) {
             await calculateScore(result.data, false, null);
@@ -195,16 +180,13 @@ const CreditScoreScreen = () => {
   };
 
   // alreadyDecrypted = true  → plain numbers from fresh router params
-  // alreadyDecrypted = false → AES ciphertexts from Firebase
-  // freshAge         = number|string|null → age from router params (highest priority)
+  // alreadyDecrypted = false → encoded strings from Firebase
   const calculateScore = async (data, alreadyDecrypted = false, freshAge = null) => {
     try {
       setAiLoading(true);
 
-      // ── FIX 2 applied — robust age derivation ──────────────
       const age = deriveAge(data, freshAge);
-
-      const fp = data.financialProfile;
+      const fp  = data.financialProfile;
 
       const income     = alreadyDecrypted ? fp.income              : decryptAES(fp.income);
       const expenses   = alreadyDecrypted ? fp.expenses            : decryptAES(fp.expenses);
@@ -227,10 +209,6 @@ const CreditScoreScreen = () => {
       const calculator = new CreditScoreCalculator();
       const ruleScore  = calculator.calculateScore(userProfile);
 
-      // ── FIX 1 applied ──────────────────────────────────────
-      // Override whatever riskLevel/rating the calculator returned
-      // with the values derived directly from the numeric score,
-      // so the label always matches the colour zone on the chart.
       const correctedRuleScore = {
         ...ruleScore,
         riskLevel: getRiskLevelFromScore(ruleScore.score),
@@ -252,7 +230,6 @@ const CreditScoreScreen = () => {
           breakdown: decision.breakdown || correctedRuleScore?.breakdown,
         });
       }
-
     } catch (error) {
       console.error('Calculation error:', error);
     } finally {
@@ -347,7 +324,6 @@ const CreditScoreScreen = () => {
             <Text style={styles.rangeText}>850</Text>
           </View>
 
-          {/* Scale legend */}
           <View style={styles.scaleLegend}>
             {[
               { color:'#E74C3C', label:'Poor',      min:300 },
@@ -364,7 +340,6 @@ const CreditScoreScreen = () => {
             ))}
           </View>
 
-          {/* Financial health summary */}
           {loanDecision?.financialHealthSummary && (
             <View style={styles.healthSummary}>
               <Text style={styles.healthSummaryText}>{loanDecision.financialHealthSummary}</Text>
@@ -411,7 +386,6 @@ const CreditScoreScreen = () => {
             </View>
           </View>
 
-          {/* Approval probability */}
           {!loanDecision.hardReject && (
             <View style={{ marginTop:8 }}>
               <Text style={styles.confidenceLabel}>
@@ -429,7 +403,6 @@ const CreditScoreScreen = () => {
             </View>
           )}
 
-          {/* Max loan + rate if approved */}
           {loanDecision.approved && loanDecision.maxLoanAmount > 0 && (
             <>
               <View style={styles.loanInfoRow}>
@@ -620,21 +593,20 @@ const styles = StyleSheet.create({
     elevation: 4, shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8,
   },
-  scoreLabel:    { fontSize: 13, color: '#6B7280', marginBottom: 8 },
-  scoreValue:    { fontSize: 72, fontWeight: 'bold', marginBottom: 6 },
-  scoreRating:   { fontSize: 18, fontWeight: '600', color: '#2C2C2C', marginBottom: 16 },
-  scoreBar:      { width: '100%', height: 8, backgroundColor: '#F0F0F0', borderRadius: 4, overflow: 'hidden', marginBottom: 8 },
-  scoreProgress: { height: '100%', borderRadius: 4 },
-  scoreRange:    { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 16 },
-  rangeText:     { fontSize: 11, color: '#9CA3AF' },
-  scaleLegend:   { flexDirection: 'row', width: '100%', marginTop: 4 },
-  healthSummary: { marginTop: 14, backgroundColor: '#F0FFF4', padding: 10, borderRadius: 10, width: '100%' },
+  scoreLabel:        { fontSize: 13, color: '#6B7280', marginBottom: 8 },
+  scoreValue:        { fontSize: 72, fontWeight: 'bold', marginBottom: 6 },
+  scoreRating:       { fontSize: 18, fontWeight: '600', color: '#2C2C2C', marginBottom: 16 },
+  scoreBar:          { width: '100%', height: 8, backgroundColor: '#F0F0F0', borderRadius: 4, overflow: 'hidden', marginBottom: 8 },
+  scoreProgress:     { height: '100%', borderRadius: 4 },
+  scoreRange:        { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 16 },
+  rangeText:         { fontSize: 11, color: '#9CA3AF' },
+  scaleLegend:       { flexDirection: 'row', width: '100%', marginTop: 4 },
+  healthSummary:     { marginTop: 14, backgroundColor: '#F0FFF4', padding: 10, borderRadius: 10, width: '100%' },
   healthSummaryText: { fontSize: 13, color: '#27AE60', textAlign: 'center', fontWeight: '600' },
 
   decisionCard: {
     backgroundColor: '#FFF', padding: 20, borderRadius: 16,
-    marginBottom: 16, borderLeftWidth: 5,
-    elevation: 3,
+    marginBottom: 16, borderLeftWidth: 5, elevation: 3,
   },
   decisionHeader:         { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   decisionTitle:          { fontSize: 17, fontWeight: 'bold' },
@@ -645,11 +617,8 @@ const styles = StyleSheet.create({
   loanInfoRow:            { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 8 },
   loanInfoText:           { fontSize: 14, color: '#2C2C2C', fontWeight: '600' },
 
-  card: {
-    backgroundColor: '#FFF', padding: 20, borderRadius: 16,
-    marginBottom: 16, elevation: 2,
-  },
-  sectionTitle:   { fontSize: 17, fontWeight: 'bold', color: '#2C2C2C', marginBottom: 16 },
+  card:         { backgroundColor: '#FFF', padding: 20, borderRadius: 16, marginBottom: 16, elevation: 2 },
+  sectionTitle: { fontSize: 17, fontWeight: 'bold', color: '#2C2C2C', marginBottom: 16 },
 
   breakdownItem:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   breakdownLeft:  { flex: 1 },
@@ -659,13 +628,13 @@ const styles = StyleSheet.create({
   impactBadge:    { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   impactText:     { fontSize: 11, fontWeight: '600', color: '#2C2C2C' },
 
-  loanOption:  { flexDirection: 'row', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, marginBottom: 12 },
-  loanIcon:    { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginRight: 14, elevation: 1 },
-  loanType:    { fontSize: 15, fontWeight: '700', color: '#2C2C2C', marginBottom: 4 },
-  loanDesc:    { fontSize: 12, color: '#6B7280', marginBottom: 8 },
-  loanDetails: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 },
-  loanDetail:  { fontSize: 12, color: '#0A2540', fontWeight: '500' },
-  loanNote:    { fontSize: 11, color: '#9CA3AF', fontStyle: 'italic', marginTop: 4 },
+  loanOption:       { flexDirection: 'row', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, marginBottom: 12 },
+  loanIcon:         { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginRight: 14, elevation: 1 },
+  loanType:         { fontSize: 15, fontWeight: '700', color: '#2C2C2C', marginBottom: 4 },
+  loanDesc:         { fontSize: 12, color: '#6B7280', marginBottom: 8 },
+  loanDetails:      { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 },
+  loanDetail:       { fontSize: 12, color: '#0A2540', fontWeight: '500' },
+  loanNote:         { fontSize: 11, color: '#9CA3AF', fontStyle: 'italic', marginTop: 4 },
   suitabilityBadge: { alignSelf: 'flex-start', backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 6 },
   suitabilityText:  { fontSize: 11, color: '#059669', fontWeight: '600' },
 

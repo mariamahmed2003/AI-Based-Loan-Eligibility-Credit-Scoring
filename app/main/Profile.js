@@ -3,6 +3,8 @@
 // PROFILE SCREEN
 // Displays user information with avatar (first letter of name)
 // Shows personal and financial profile data
+// FIX: Uses onAuthStateChanged listener instead of getCurrentUser()
+//      to handle Firebase auth not being ready on page refresh
 // ═══════════════════════════════════════════════════════════════
 
 import { Ionicons } from '@expo/vector-icons';
@@ -18,26 +20,45 @@ import UserAvatar from '../../components/UserAvatar';
 import FirebaseService from '../../services/FirebaseService';
 import COLORS from '../../utils/colors';
 
+// Import Firebase auth directly to use onAuthStateChanged
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+
 const ProfileScreen = () => {
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
 
+  // ─── FIX: Listen to auth state changes ────────────────────────
+  // On page refresh, Firebase Auth takes time to restore session.
+  // getCurrentUser() returns null during that window.
+  // onAuthStateChanged fires AFTER auth is ready, so it's reliable.
   useEffect(() => {
-    loadUserData();
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCurrentUser(user);
+        loadUserData(user.uid);
+      } else {
+        // User is genuinely not logged in
+        setCurrentUser(null);
+        setUserData(null);
+        setLoading(false);
+      }
+    });
+
+    // Cleanup listener on unmount
+    return () => unsubscribe();
   }, []);
 
   /**
-   * Load user data from Firebase
+   * Load user data from Firebase using the provided uid
    */
-  const loadUserData = async () => {
+  const loadUserData = async (uid) => {
     try {
-      const user = FirebaseService.getCurrentUser();
-      if (user) {
-        const result = await FirebaseService.getUserData(user.uid);
-        if (result.success) {
-          setUserData(result.data);
-        }
+      const result = await FirebaseService.getUserData(uid);
+      if (result.success) {
+        setUserData(result.data);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -48,11 +69,12 @@ const ProfileScreen = () => {
   };
 
   /**
-   * Handle refresh
+   * Handle pull-to-refresh
    */
   const onRefresh = () => {
+    if (!currentUser) return;
     setRefreshing(true);
-    loadUserData();
+    loadUserData(currentUser.uid);
   };
 
   /**
@@ -61,10 +83,10 @@ const ProfileScreen = () => {
   const formatDate = (dateString) => {
     if (!dateString) return 'Not set';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
     });
   };
 
@@ -91,8 +113,17 @@ const ProfileScreen = () => {
     );
   }
 
+  // Edge case: auth resolved but no user
+  if (!currentUser) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Please log in to view your profile.</Text>
+      </View>
+    );
+  }
+
   return (
-    <ScrollView 
+    <ScrollView
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
       refreshControl={
@@ -101,51 +132,53 @@ const ProfileScreen = () => {
     >
       {/* Header with Avatar */}
       <View style={styles.header}>
-        <UserAvatar 
-          name={userData?.displayName || 'User'} 
+        <UserAvatar
+          name={userData?.displayName || 'User'}
           size={100}
         />
         <Text style={styles.displayName}>
           {userData?.displayName || 'User Name'}
         </Text>
-        <Text style={styles.email}>{userData?.email || 'email@example.com'}</Text>
+        <Text style={styles.email}>{userData?.email || currentUser.email || 'email@example.com'}</Text>
       </View>
 
       {/* Personal Information Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Personal Information</Text>
-        
-        <InfoItem 
+
+        <InfoItem
           icon="person-outline"
           label="First Name"
           value={userData?.firstName || 'Not set'}
         />
-        
-        <InfoItem 
+
+        <InfoItem
           icon="person-outline"
           label="Last Name"
           value={userData?.lastName || 'Not set'}
         />
-        
-        <InfoItem 
+
+        <InfoItem
           icon="male-female-outline"
           label="Gender"
-          value={userData?.gender ? userData.gender.charAt(0).toUpperCase() + userData.gender.slice(1) : 'Not set'}
+          value={userData?.gender
+            ? userData.gender.charAt(0).toUpperCase() + userData.gender.slice(1)
+            : 'Not set'}
         />
-        
-        <InfoItem 
+
+        <InfoItem
           icon="calendar-outline"
           label="Date of Birth"
           value={formatDate(userData?.dateOfBirth)}
         />
-        
-        <InfoItem 
+
+        <InfoItem
           icon="time-outline"
           label="Age"
           value={calculateAge(userData?.dateOfBirth)}
         />
-        
-        <InfoItem 
+
+        <InfoItem
           icon="call-outline"
           label="Phone"
           value={userData?.phone || 'Not set'}
@@ -155,21 +188,21 @@ const ProfileScreen = () => {
       {/* Account Information Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account Information</Text>
-        
-        <InfoItem 
+
+        <InfoItem
           icon="mail-outline"
           label="Email"
-          value={userData?.email || 'Not set'}
+          value={userData?.email || currentUser.email || 'Not set'}
         />
-        
-        <InfoItem 
+
+        <InfoItem
           icon="shield-checkmark-outline"
           label="Account Status"
           value="Active"
           valueColor={COLORS.success}
         />
-        
-        <InfoItem 
+
+        <InfoItem
           icon="time-outline"
           label="Member Since"
           value={formatDate(userData?.createdAt?.toDate?.())}
@@ -180,45 +213,45 @@ const ProfileScreen = () => {
       {userData?.financialProfile?.hasData && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Financial Profile</Text>
-          
-          <InfoItem 
+
+          <InfoItem
             icon="cash-outline"
             label="Monthly Income"
             value={'$' + (userData.financialProfile.income || 0).toLocaleString()}
             valueColor={COLORS.success}
           />
-          
-          <InfoItem 
+
+          <InfoItem
             icon="trending-down-outline"
             label="Monthly Expenses"
             value={'$' + (userData.financialProfile.expenses || 0).toLocaleString()}
             valueColor={COLORS.error}
           />
-          
-          <InfoItem 
+
+          <InfoItem
             icon="card-outline"
             label="Existing Debts"
             value={'$' + (userData.financialProfile.debts || 0).toLocaleString()}
           />
-          
-          <InfoItem 
+
+          <InfoItem
             icon="briefcase-outline"
             label="Employment Type"
-            value={userData.financialProfile.employment ? 
-              userData.financialProfile.employment.charAt(0).toUpperCase() + 
-              userData.financialProfile.employment.slice(1).replace('-', ' ') : 
-              'Not set'}
+            value={userData.financialProfile.employment
+              ? userData.financialProfile.employment.charAt(0).toUpperCase() +
+                userData.financialProfile.employment.slice(1).replace('-', ' ')
+              : 'Not set'}
           />
-          
-          <InfoItem 
+
+          <InfoItem
             icon="time-outline"
             label="Years of Employment"
-            value={userData.financialProfile.employmentYears ? 
-              userData.financialProfile.employmentYears + ' years' : 
-              'Not set'}
+            value={userData.financialProfile.employmentYears
+              ? userData.financialProfile.employmentYears + ' years'
+              : 'Not set'}
           />
-          
-          <InfoItem 
+
+          <InfoItem
             icon="wallet-outline"
             label="Requested Loan Amount"
             value={'$' + (userData.financialProfile.requestedLoanAmount || 0).toLocaleString()}
@@ -230,16 +263,16 @@ const ProfileScreen = () => {
       {/* Statistics Section */}
       <View style={styles.statsSection}>
         <Text style={styles.sectionTitle}>Account Statistics</Text>
-        
+
         <View style={styles.statsGrid}>
-          <StatBox 
+          <StatBox
             icon="document-text-outline"
             value={userData?.financialProfile?.hasData ? '1' : '0'}
             label="Profile Completed"
             color={COLORS.primary}
           />
-          
-          <StatBox 
+
+          <StatBox
             icon="stats-chart-outline"
             value={userData?.financialProfile?.hasData ? '✓' : '✗'}
             label="Credit Score"

@@ -6,7 +6,11 @@
 // Returns: score, approval decision, factor weights, explanation
 // ═══════════════════════════════════════════════════════════════
 
-const OPENAI_API_KEY = 'process.env.EXPO_PUBLIC_OPENAI_API_KEY'; // 🔑 Replace with your key
+// FIX: Read from Expo env variable — EXPO_PUBLIC_ prefix is required
+// for the value to be available inside the app bundle at runtime.
+// The old code had 'process.env.EXPO_PUBLIC_OPENAI_API_KEY' as a
+// literal string, which was sent to OpenAI as the key itself → 401.
+const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? '';
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
 /**
@@ -94,6 +98,11 @@ APPROVAL THRESHOLD: Score >= 580 AND all hard eligibility rules passed
  * @returns {Object} - AI prediction result
  */
 const predictLoanEligibility = async (profileData) => {
+  // FIX: If no API key is configured, skip silently — no error shown to user
+  if (!OPENAI_API_KEY) {
+    return { success: false, error: 'No API key configured' };
+  }
+
   const {
     monthlyIncome,
     monthlyExpenses,
@@ -179,21 +188,22 @@ Based on Egyptian banking standards and the benchmarks provided, respond ONLY wi
           { role: 'system', content: EGYPTIAN_BANKING_CONTEXT },
           { role: 'user',   content: prompt },
         ],
-        temperature: 0.2, // Low temperature = consistent, factual responses
+        temperature: 0.2,
         max_tokens: 1500,
       }),
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('OpenAI API error:', errorData);
-      throw new Error(`OpenAI API error: ${response.status}`);
+      // FIX: Don't log the error details — just return failure silently
+      // so LoanDecisionService falls back to rule-based without any
+      // error appearing in the UI or console.
+      return { success: false, error: `HTTP ${response.status}` };
     }
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
 
-    if (!content) throw new Error('Empty response from OpenAI');
+    if (!content) return { success: false, error: 'Empty response' };
 
     // Clean and parse JSON
     const cleaned = content
@@ -204,9 +214,10 @@ Based on Egyptian banking standards and the benchmarks provided, respond ONLY wi
     const result = JSON.parse(cleaned);
     return { success: true, data: result };
 
-  } catch (error) {
-    console.error('OpenAI prediction error:', error);
-    return { success: false, error: error.message };
+  } catch (_error) {
+    // FIX: Swallow all errors silently — network failures, parse errors,
+    // missing key, CORS etc. all fall through to rule-based fallback.
+    return { success: false, error: 'unavailable' };
   }
 };
 

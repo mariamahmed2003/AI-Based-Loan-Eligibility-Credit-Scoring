@@ -1,7 +1,5 @@
 // app/(main)/financial.js
 import { Ionicons } from '@expo/vector-icons';
-import { Picker } from '@react-native-picker/picker';
-import CryptoJS from 'crypto-js';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -17,10 +15,62 @@ import {
 } from 'react-native';
 import FirebaseService from '../../services/FirebaseService';
 
-// Encryption Configuration
-const SECRET_KEY = 'your-secure-secret-key-here'; 
+// ── Encryption Configuration ────────────────────────────────────
+// FIX: crypto-js uses window.crypto / native crypto APIs that are
+// NOT available in Expo Go on Android → "Native crypto module not found".
+// Solution: pure-JS XOR cipher + base64. Zero native dependencies.
+// Data is still obfuscated in Firebase. Swap for expo-crypto after ejecting.
+const SECRET_KEY = 'your-secure-secret-key-here';
 
-// Theme configuration 
+const xorEncrypt = (text, key) => {
+  if (!text) return '';
+  const str = String(text);
+  let result = '';
+  for (let i = 0; i < str.length; i++) {
+    result += String.fromCharCode(
+      str.charCodeAt(i) ^ key.charCodeAt(i % key.length)
+    );
+  }
+  try {
+    return btoa(unescape(encodeURIComponent(result)));
+  } catch {
+    return btoa(result);
+  }
+};
+
+const xorDecrypt = (encoded, key) => {
+  if (!encoded) return '';
+  try {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(escape(atob(encoded)));
+    } catch {
+      decoded = atob(encoded);
+    }
+    let result = '';
+    for (let i = 0; i < decoded.length; i++) {
+      result += String.fromCharCode(
+        decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length)
+      );
+    }
+    return result;
+  } catch (error) {
+    console.warn('Decryption failed, returning raw value:', error.message);
+    return encoded;
+  }
+};
+
+// Same public API as before — credit.js uses these same names
+const encryptAES = (text) => xorEncrypt(text, SECRET_KEY);
+const decryptAES = (ciphertext) => {
+  if (!ciphertext) return '';
+  // Graceful fallback: if the stored value is already a plain number
+  // (data saved before encryption was added), return it directly
+  if (/^\d+(\.\d+)?$/.test(String(ciphertext).trim())) return String(ciphertext).trim();
+  return xorDecrypt(ciphertext, SECRET_KEY);
+};
+
+// Theme configuration
 const THEME = {
   primary:   '#0A2540',
   accent:    '#2ECC71',
@@ -32,31 +82,107 @@ const THEME = {
   error:     '#E53E3E',
 };
 
-// ── Encryption Helpers ──────────────────────────────────────────
-const encryptAES = (text) => {
-  if (!text) return '';
-  return CryptoJS.AES.encrypt(text.toString(), SECRET_KEY).toString();
-};
+// ── Platform-safe Picker ────────────────────────────────────────
+const EMPLOYMENT_OPTIONS = [
+  { label: 'Permanent',     value: 'permanent'    },
+  { label: 'Contract',      value: 'contract'     },
+  { label: 'Self-Employed', value: 'self-employed'},
+  { label: 'Unemployed',    value: 'unemployed'   },
+];
 
-const decryptAES = (ciphertext) => {
-  if (!ciphertext) return '';
-  try {
-    const bytes = CryptoJS.AES.decrypt(ciphertext, SECRET_KEY);
-    return bytes.toString(CryptoJS.enc.Utf8);
-  } catch (error) {
-    console.error("Decryption failed", error);
-    return '';
+const WebSelect = ({ selectedValue, onValueChange }) => (
+  <View style={pickerStyles.wrapper}>
+    <select
+      value={selectedValue}
+      onChange={(e) => onValueChange(e.target.value)}
+      style={{
+        width: '100%', height: 56, border: 'none', outline: 'none',
+        background: 'transparent', fontSize: 15, color: THEME.text,
+        paddingLeft: 10, paddingRight: 10, cursor: 'pointer',
+        appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
+      }}
+    >
+      {EMPLOYMENT_OPTIONS.map(opt => (
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
+    <View style={pickerStyles.chevron} pointerEvents="none">
+      <Ionicons name="chevron-down" size={16} color={THEME.textLight} />
+    </View>
+  </View>
+);
+
+const MobilePicker = ({ selectedValue, onValueChange }) => {
+  const [PickerComponent, setPickerComponent] = useState(null);
+
+  useEffect(() => {
+    import('@react-native-picker/picker')
+      .then(mod => setPickerComponent(() => mod.Picker))
+      .catch(() => setPickerComponent(null));
+  }, []);
+
+  if (!PickerComponent) {
+    const currentLabel = EMPLOYMENT_OPTIONS.find(o => o.value === selectedValue)?.label || 'Permanent';
+    return (
+      <TouchableOpacity
+        style={pickerStyles.fallback}
+        onPress={() => {
+          const idx  = EMPLOYMENT_OPTIONS.findIndex(o => o.value === selectedValue);
+          const next = EMPLOYMENT_OPTIONS[(idx + 1) % EMPLOYMENT_OPTIONS.length];
+          onValueChange(next.value);
+        }}
+        activeOpacity={0.7}
+      >
+        <Text style={pickerStyles.fallbackText}>{currentLabel}</Text>
+        <Ionicons name="swap-vertical-outline" size={16} color={THEME.textLight} />
+      </TouchableOpacity>
+    );
   }
+
+  return (
+    <View style={pickerStyles.wrapper}>
+      <PickerComponent
+        selectedValue={selectedValue}
+        onValueChange={onValueChange}
+        style={pickerStyles.picker}
+        dropdownIconColor={THEME.textLight}
+        mode="dropdown"
+      >
+        {EMPLOYMENT_OPTIONS.map(opt => (
+          <PickerComponent.Item key={opt.value} label={opt.label} value={opt.value} />
+        ))}
+      </PickerComponent>
+    </View>
+  );
 };
 
-// ── Shared CustomInput Component ────────────────────────────────
+const EmploymentPicker = ({ selectedValue, onValueChange }) => {
+  if (Platform.OS === 'web') {
+    return <WebSelect selectedValue={selectedValue} onValueChange={onValueChange} />;
+  }
+  return <MobilePicker selectedValue={selectedValue} onValueChange={onValueChange} />;
+};
+
+const pickerStyles = StyleSheet.create({
+  wrapper: {
+    backgroundColor: THEME.inputBg, borderRadius: 30, height: 58,
+    justifyContent: 'center', paddingHorizontal: 10,
+    overflow: 'hidden', position: 'relative',
+  },
+  picker:       { color: THEME.text, backgroundColor: 'transparent' },
+  chevron:      { position: 'absolute', right: 16, top: 0, bottom: 0, justifyContent: 'center' },
+  fallback:     { backgroundColor: THEME.inputBg, borderRadius: 30, height: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
+  fallbackText: { fontSize: 15, color: THEME.text },
+});
+
+// ── CustomInput ─────────────────────────────────────────────────
 const CustomInput = ({
   placeholder, value, onChangeText,
   keyboardType = 'default', containerStyle,
   error, editable = true, onBlur, onFocus,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
-  
+
   return (
     <View style={{ width: '100%' }}>
       <View style={[
@@ -92,6 +218,7 @@ const CustomInput = ({
   );
 };
 
+// ── Main Screen ─────────────────────────────────────────────────
 const FinancialInputScreen = () => {
   const router = useRouter();
 
@@ -117,8 +244,6 @@ const FinancialInputScreen = () => {
         const result = await FirebaseService.getUserData(user.uid);
         if (result.success && result.data.financialProfile?.hasData) {
           const fp = result.data.financialProfile;
-          // ✅ Decrypt HERE — the moment we pull from Firebase — so formData
-          // always holds plain, human-readable numbers inside the app.
           setFormData({
             monthlyIncome:       decryptAES(fp.income)              || '',
             monthlyExpenses:     decryptAES(fp.expenses)            || '',
@@ -142,18 +267,16 @@ const FinancialInputScreen = () => {
       const numericValue = value.replace(/[^0-9.]/g, '');
       setFormData(prev => ({ ...prev, [field]: numericValue }));
     }
-    
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
   };
 
   const validateForm = () => {
     const newErrors = {};
-    if (!formData.monthlyIncome) newErrors.monthlyIncome = 'Required';
-    if (!formData.monthlyExpenses) newErrors.monthlyExpenses = 'Required';
-    if (!formData.existingDebts) newErrors.existingDebts = 'Required';
-    if (!formData.employmentYears) newErrors.employmentYears = 'Required';
+    if (!formData.monthlyIncome)       newErrors.monthlyIncome       = 'Required';
+    if (!formData.monthlyExpenses)     newErrors.monthlyExpenses     = 'Required';
+    if (!formData.existingDebts)       newErrors.existingDebts       = 'Required';
+    if (!formData.employmentYears)     newErrors.employmentYears     = 'Required';
     if (!formData.requestedLoanAmount) newErrors.requestedLoanAmount = 'Required';
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -167,22 +290,33 @@ const FinancialInputScreen = () => {
     setLoading(true);
     try {
       const user = FirebaseService.getCurrentUser();
-      if (!user) return;
+      if (!user) {
+        Alert.alert('Error', 'You are not logged in. Please log in and try again.');
+        return;
+      }
+
+      // safeEncrypt: if encryption somehow fails, fall back to plain string
+      // so the save never crashes the app
+      const safeEncrypt = (val) => {
+        try { return encryptAES(val); }
+        catch (e) {
+          console.warn('Encrypt fallback for val:', val, e.message);
+          return String(val);
+        }
+      };
 
       const result = await FirebaseService.saveFinancialProfile(user.uid, {
-        // ✅ Encrypt ONLY here — the boundary where data leaves the app into Firebase.
-        // Everything inside the app (formData, router params) stays as plain numbers.
-        income:              encryptAES(formData.monthlyIncome),
-        expenses:            encryptAES(formData.monthlyExpenses),
-        debts:               encryptAES(formData.existingDebts),
-        employment:          formData.employmentType,           // string, no encrypt needed
-        employmentYears:     encryptAES(formData.employmentYears),
-        requestedLoanAmount: encryptAES(formData.requestedLoanAmount),
+        income:              safeEncrypt(formData.monthlyIncome),
+        expenses:            safeEncrypt(formData.monthlyExpenses),
+        debts:               safeEncrypt(formData.existingDebts),
+        employment:          formData.employmentType,
+        employmentYears:     safeEncrypt(formData.employmentYears),
+        requestedLoanAmount: safeEncrypt(formData.requestedLoanAmount),
         hasData: true,
       });
 
       if (result.success) {
-        // Pass plain values — no encryption, no decryption needed in CreditScore
+        // Pass plain values to CreditScore — no decryption needed there
         router.push({
           pathname: '/main/CreditScore',
           params: {
@@ -199,7 +333,7 @@ const FinancialInputScreen = () => {
       }
     } catch (error) {
       console.error('Save error:', error);
-      Alert.alert('Error', 'An unexpected error occurred.');
+      Alert.alert('Error', `Failed to save: ${error?.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -211,7 +345,7 @@ const FinancialInputScreen = () => {
       style={{ flex: 1, backgroundColor: THEME.card }}
     >
       <ScrollView contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-        
+
         <View style={styles.header}>
           <Text style={styles.title}>Financial Profile</Text>
           <Text style={styles.subtitle}>Enter your details for an AI credit assessment</Text>
@@ -253,20 +387,10 @@ const FinancialInputScreen = () => {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Employment Type</Text>
-            <View style={styles.pickerWrapper}>
-              <Picker
-                selectedValue={formData.employmentType}
-                onValueChange={(v) => updateField('employmentType', v)}
-                style={styles.picker}
-                dropdownIconColor={THEME.textLight}
-                mode="dropdown"
-              >
-                <Picker.Item label="Permanent" value="permanent" />
-                <Picker.Item label="Contract" value="contract" />
-                <Picker.Item label="Self-Employed" value="self-employed" />
-                <Picker.Item label="Unemployed" value="unemployed" />
-              </Picker>
-            </View>
+            <EmploymentPicker
+              selectedValue={formData.employmentType}
+              onValueChange={(v) => updateField('employmentType', v)}
+            />
           </View>
 
           <View style={styles.inputGroup}>
@@ -315,45 +439,27 @@ const FinancialInputScreen = () => {
 
 const styles = StyleSheet.create({
   contentContainer: { paddingHorizontal: 25, paddingTop: 40, paddingBottom: 30 },
-  header: { marginBottom: 30 },
-  title: { fontSize: 34, fontWeight: 'bold', color: THEME.text, letterSpacing: -0.5 },
-  subtitle: { fontSize: 16, color: THEME.textLight, marginTop: 8 },
-  form: { width: '100%' },
-  inputGroup: { marginBottom: 16 },
-  label: { fontSize: 15, fontWeight: '600', color: THEME.primary, marginBottom: 8, marginLeft: 4 },
-  
+  header:           { marginBottom: 30 },
+  title:            { fontSize: 34, fontWeight: 'bold', color: THEME.text, letterSpacing: -0.5 },
+  subtitle:         { fontSize: 16, color: THEME.textLight, marginTop: 8 },
+  form:             { width: '100%' },
+  inputGroup:       { marginBottom: 16 },
+  label:            { fontSize: 15, fontWeight: '600', color: THEME.primary, marginBottom: 8, marginLeft: 4 },
+
   inputContainer: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: THEME.inputBg, borderRadius: 30,
     borderWidth: 1.5, borderColor: 'transparent',
     height: 58, paddingHorizontal: 20,
-    elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3,
+    elevation: 1,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04, shadowRadius: 3,
   },
-  inputContainerFocused: { backgroundColor: THEME.card, elevation: 3, shadowOpacity: 0.08 },
-  inputContainerError:   { borderColor: THEME.error, backgroundColor: '#FFF5F5' },
-  inputContainerDisabled:{ opacity: 0.55 },
-  
-  input: { 
-    flex: 1, 
-    fontSize: 15, 
-    color: THEME.text,
-    borderWidth: 0,
-    outlineWidth: 0,
-    outlineStyle: 'none',
-  },
+  inputContainerFocused:  { backgroundColor: THEME.card, elevation: 3, shadowOpacity: 0.08 },
+  inputContainerError:    { borderColor: THEME.error, backgroundColor: '#FFF5F5' },
+  inputContainerDisabled: { opacity: 0.55 },
 
-  pickerWrapper: {
-    backgroundColor: THEME.inputBg, borderRadius: 30,
-    height: 58, justifyContent: 'center', paddingHorizontal: 10,
-    overflow: 'hidden',
-  },
-  picker: { 
-    color: THEME.text,
-    borderWidth: 0,
-    outlineWidth: 0,
-    outlineStyle: 'none',
-    backgroundColor: 'transparent',
-  },
+  input: { flex: 1, fontSize: 15, color: THEME.text, ...(Platform.OS === 'web' && { outlineWidth: 0, outlineStyle: 'none' }) },
 
   errorRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 6, marginLeft: 6 },
   errorText: { fontSize: 12, color: THEME.error, marginLeft: 4, fontWeight: '500' },
@@ -365,7 +471,7 @@ const styles = StyleSheet.create({
   pillButtonText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 16 },
 
   secureFooter: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 25 },
-  footerText: { fontSize: 12, color: THEME.textLight, marginLeft: 5, fontWeight: '500' },
+  footerText:   { fontSize: 12, color: THEME.textLight, marginLeft: 5, fontWeight: '500' },
 });
 
 export default FinancialInputScreen;
