@@ -887,6 +887,27 @@ const PrivacyModal = ({ visible, onClose, privacy, setPrivacy }) => {
 const ExportDataModal = ({ visible, onClose, userData }) => {
   const [exporting, setExporting] = useState(false);
 
+  // FIX: Inline XOR decryption — same cipher + key as financial.js
+  // so exported files show plain numbers instead of encrypted strings.
+  const _SK = 'your-secure-secret-key-here';
+  const _xorDec = (encoded, key) => {
+    if (!encoded) return '';
+    try {
+      let decoded;
+      try { decoded = decodeURIComponent(escape(atob(encoded))); }
+      catch { decoded = atob(encoded); }
+      let result = '';
+      for (let i = 0; i < decoded.length; i++)
+        result += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+      return result;
+    } catch { return encoded; }
+  };
+  const dec = (v) => {
+    if (!v) return '0';
+    if (/^\d+(\.\d+)?$/.test(String(v).trim())) return String(v).trim();
+    return _xorDec(v, _SK);
+  };
+
   const buildCSV = () => {
     const fp  = userData?.financialProfile || {};
     const now = new Date().toLocaleDateString('en-EG');
@@ -900,12 +921,12 @@ const ExportDataModal = ({ visible, onClose, userData }) => {
       ['Phone', userData?.phone || 'N/A'],
       [''],
       ['FINANCIAL PROFILE'],
-      ['Monthly Income (EGP)',    fp.income              || 'N/A'],
-      ['Monthly Expenses (EGP)',  fp.expenses            || 'N/A'],
-      ['Existing Debts (EGP)',    fp.debts               || 'N/A'],
-      ['Employment Type',         fp.employment          || 'N/A'],
-      ['Employment Years',        fp.employmentYears     || 'N/A'],
-      ['Requested Loan (EGP)',    fp.requestedLoanAmount || 'N/A'],
+      ['Monthly Income (EGP)',    dec(fp.income)              || 'N/A'],
+      ['Monthly Expenses (EGP)',  dec(fp.expenses)            || 'N/A'],
+      ['Existing Debts (EGP)',    dec(fp.debts)               || 'N/A'],
+      ['Employment Type',         fp.employment               || 'N/A'],
+      ['Employment Years',        dec(fp.employmentYears)     || 'N/A'],
+      ['Requested Loan (EGP)',    dec(fp.requestedLoanAmount) || 'N/A'],
       ['Data Recorded',           fp.hasData ? 'Yes' : 'No'],
     ];
     return rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
@@ -930,10 +951,23 @@ const ExportDataModal = ({ visible, onClose, userData }) => {
     if (!userData) { showAlert('No Data', 'No data available to export yet.', [{ text: 'OK' }]); return; }
     setExporting(true);
     try {
+      const fp = userData?.financialProfile || {};
       const safe = {
-        personalInfo:     { displayName: userData?.displayName || userData?.name, email: userData?.email, phone: userData?.phone },
-        financialProfile: userData?.financialProfile || {},
-        exportedAt:       new Date().toISOString(),
+        personalInfo: {
+          displayName: userData?.displayName || userData?.name,
+          email:       userData?.email,
+          phone:       userData?.phone,
+        },
+        financialProfile: {
+          income:              dec(fp.income),
+          expenses:            dec(fp.expenses),
+          debts:               dec(fp.debts),
+          employment:          fp.employment,
+          employmentYears:     dec(fp.employmentYears),
+          requestedLoanAmount: dec(fp.requestedLoanAmount),
+          hasData:             fp.hasData,
+        },
+        exportedAt: new Date().toISOString(),
       };
       const json     = JSON.stringify(safe, null, 2);
       const filename = `AILoan_Export_${Date.now()}.json`;
