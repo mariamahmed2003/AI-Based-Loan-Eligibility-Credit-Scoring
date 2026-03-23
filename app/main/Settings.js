@@ -1082,7 +1082,7 @@ const SettingButton = ({ icon, title, onPress, dangerous, last }) => (
 const styles = StyleSheet.create({
   container:        { flex: 1, backgroundColor: '#F2F3F7' },
   contentContainer: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 110 },
-  header:           { marginBottom: 20, marginTop: 10 },
+  header:           { marginBottom: 20, marginTop: 40 },
   title:            { fontSize: 24, fontWeight: '800', color: '#0A2540', marginBottom: 2 },
   subtitle:         { fontSize: 13, color: '#9CA3AF' },
 

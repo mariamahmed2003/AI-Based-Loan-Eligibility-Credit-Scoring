@@ -332,9 +332,9 @@ const InfoItem = ({ icon, label, value, valueColor = COLORS.text }) => (
       <View style={styles.iconContainer}>
         <Ionicons name={icon} size={20} color={COLORS.primary} />
       </View>
-      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoLabel} numberOfLines={1}>{label}</Text>
     </View>
-    <Text style={[styles.infoValue, { color: valueColor }]}>{value}</Text>
+    <Text style={[styles.infoValue, { color: valueColor }]} numberOfLines={1} ellipsizeMode="tail">{value}</Text>
   </View>
 );
 
@@ -357,8 +357,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   contentContainer: {
-    padding: 20,
-    paddingBottom: 40,
+    padding: 16,
+    paddingBottom: 32,
   },
   loadingContainer: {
     flex: 1,
@@ -372,16 +372,14 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    paddingVertical: 30,
+    paddingVertical: 24,
     backgroundColor: COLORS.white,
     borderRadius: 16,
-    marginBottom: 20,
-    marginTop: 20,
-    elevation: 2,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    marginBottom: 12,
+    marginTop: 8,
+    // ─── FIX: removed gray frame (elevation/shadow) ───
+    elevation: 0,
+    shadowOpacity: 0,
   },
   displayName: {
     fontSize: 24,
@@ -398,31 +396,31 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
-    elevation: 1,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    marginBottom: 12,
+    // ─── FIX: removed gray frame (elevation/shadow) ───
+    elevation: 0,
+    shadowOpacity: 0,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: 'bold',
     color: COLORS.text,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   infoItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
   infoLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    // ─── FIX: constrain left side so label never overflows ───
     flex: 1,
+    marginRight: 8,
   },
   iconContainer: {
     width: 36,
@@ -431,20 +429,27 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
+    // ─── FIX: prevent icon from shrinking ───
+    flexShrink: 0,
   },
   infoLabel: {
     fontSize: 14,
     color: COLORS.textLight,
+    // ─── FIX: flex:1 + flexShrink prevents label from stacking vertically ───
     flex: 1,
+    flexShrink: 1,
   },
   infoValue: {
     fontSize: 14,
     fontWeight: '600',
-    marginLeft: 12,
+    // ─── FIX: right-align value, cap its width, never push label ───
+    flexShrink: 0,
+    maxWidth: '45%',
+    textAlign: 'right',
   },
   statsSection: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   statsGrid: {
     flexDirection: 'row',
@@ -457,11 +462,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     marginHorizontal: 4,
-    elevation: 1,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    // ─── FIX: removed gray frame (elevation/shadow) ───
+    elevation: 0,
+    shadowOpacity: 0,
   },
   statIconContainer: {
     width: 56,
@@ -486,14 +489,15 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary + '10',
     padding: 16,
     borderRadius: 12,
-    marginTop: 8,
+    marginTop: 4,
+    alignItems: 'flex-start',
   },
   infoText: {
     flex: 1,
     fontSize: 13,
     color: COLORS.primary,
     lineHeight: 18,
-    marginLeft: 12,
+    marginLeft: 10,
   },
 });
 
