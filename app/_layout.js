@@ -33,7 +33,7 @@ export default function RootLayout() {
 
     if (!user && !inAuthGroup && !isSplash) {
       // Not logged in? Force to Welcome
-      router.replace('/Auth/welcomescreen');
+      router.replace('/Auth/WelcomeScreen');
     } else if (user && (inAuthGroup || isSplash)) {
       // Logged in? Force to Home
       router.replace('/main/home');
@@ -45,9 +45,9 @@ export default function RootLayout() {
       <StatusBar style="light" backgroundColor={COLORS.primary} />
       <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         <Stack.Screen name="index" />
-        <Stack.Screen name="Auth/welcomescreen" />
-        <Stack.Screen name="Auth/signupscreen" />
-        <Stack.Screen name="Auth/signinscreen" />
+        <Stack.Screen name="Auth/WelcomeScreen" />
+        <Stack.Screen name="Auth/SignUpScreen" />
+        <Stack.Screen name="Auth/SigninScreen" />
         <Stack.Screen name="main" />
       </Stack>
     </ThemeProvider>
