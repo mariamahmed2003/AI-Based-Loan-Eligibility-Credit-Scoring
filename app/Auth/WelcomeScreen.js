@@ -233,7 +233,7 @@ const WelcomeScreen = () => {
         {/* Get Started – white bg, colored text */}
         <TouchableOpacity
           style={styles.btnPrimary}
-          onPress={() => router.push('/Auth/signupscreen')}
+          onPress={() => router.push('/Auth/SignUpScreen')}
           activeOpacity={0.82}
         >
           <Text style={styles.btnPrimaryText}>Get Started</Text>
@@ -242,7 +242,7 @@ const WelcomeScreen = () => {
         {/* Already have account – colored bg, white text, white border */}
         <TouchableOpacity
           style={styles.btnOutline}
-          onPress={() => router.push('/Auth/signinscreen')}
+          onPress={() => router.push('/Auth/SigninScreen')}
           activeOpacity={0.75}
         >
           <Text style={styles.btnOutlineText}>I Already Have an Account</Text>
