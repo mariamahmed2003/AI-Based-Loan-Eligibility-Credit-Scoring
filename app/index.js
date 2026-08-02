@@ -147,7 +147,7 @@ const SplashScreen = () => {
           router.replace('/main/home');
         } else {
           console.log('ℹ️ No user logged in, navigating to welcome');
-          router.replace('/Auth/welcomescreen');
+          router.replace('/Auth/WelcomeScreen');
         }
         setIsChecking(false);
       }, 3500); // ✓ increased from 2500ms to 3500ms (3.5 seconds)
